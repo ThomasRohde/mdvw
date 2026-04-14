@@ -1,0 +1,74 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mdvw"
+dynamic = ["version"]
+description = "Fast, portable, fully offline Markdown viewer/editor for Windows."
+readme = "README.md"
+requires-python = ">=3.13"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Thomas Klok Rohde", email = "rohde.thomas@gmail.com" }]
+keywords = ["markdown", "viewer", "editor", "katex", "mermaid", "windows"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: Microsoft :: Windows :: Windows 10",
+    "Operating System :: Microsoft :: Windows :: Windows 11",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Text Processing :: Markup :: Markdown",
+]
+dependencies = [
+    "pywebview>=5.4",
+    "markdown-it-py>=3.0",
+    "mdit-py-plugins>=0.4.2",
+    "linkify-it-py>=2.0",
+    "nh3>=0.2.19",
+    "pystray>=0.19.5",
+    "Pillow>=11.0",
+    "watchfiles>=1.0",
+    "darkdetect>=0.8",
+    'pywin32>=308; sys_platform == "win32"',
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+    "ruff>=0.8",
+    "pyinstaller>=6.11",
+]
+
+[project.scripts]
+mdvw = "mdvw.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/ThomasRohde/mdvw"
+Issues = "https://github.com/ThomasRohde/mdvw/issues"
+Changelog = "https://github.com/ThomasRohde/mdvw/blob/main/CHANGELOG.md"
+
+[tool.hatch.version]
+path = "src/mdvw/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mdvw"]
+# Include vendored assets (non-.py files) in the wheel.
+artifacts = ["src/mdvw/assets/**"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/mdvw", "README.md", "LICENSE", "CHANGELOG.md"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

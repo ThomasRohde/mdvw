@@ -1,0 +1,69 @@
+from mdvw.render import render_markdown
+
+
+def test_basic_heading():
+    assert "<h1>Hello</h1>" in render_markdown("# Hello")
+
+
+def test_table():
+    html = render_markdown("| a | b |\n|---|---|\n| 1 | 2 |\n")
+    assert "<table>" in html and "<td>1</td>" in html
+
+
+def test_highlight():
+    html = render_markdown("this is ==important==")
+    assert "<mark>important</mark>" in html
+
+
+def test_underline():
+    html = render_markdown("tap ++here++")
+    assert "<u>here</u>" in html
+
+
+def test_color():
+    html = render_markdown("{color:orange}hot{/color}")
+    assert 'class="mdvw-color"' in html
+    assert 'data-color="orange"' in html
+    assert "hot" in html
+
+
+def test_color_nested_formatting():
+    html = render_markdown("{color:cyan}**bold** word{/color}")
+    assert "<strong>bold</strong>" in html
+    assert 'data-color="cyan"' in html
+
+
+def test_inline_math():
+    html = render_markdown("Euler: $e^{i\\pi}+1=0$")
+    assert 'class="math math-inline"' in html
+
+
+def test_block_math():
+    html = render_markdown("$$\nx = 1\n$$")
+    assert 'class="math math-display"' in html
+
+
+def test_mermaid_fence():
+    html = render_markdown("```mermaid\ngraph LR\nA-->B\n```")
+    assert '<pre class="mermaid">' in html
+
+
+def test_code_fence_language():
+    html = render_markdown("```python\nprint('hi')\n```")
+    assert 'class="language-python"' in html
+
+
+def test_task_list():
+    html = render_markdown("- [x] done\n- [ ] todo\n")
+    assert 'type="checkbox"' in html and "checked" in html
+
+
+def test_strikethrough():
+    html = render_markdown("~~gone~~")
+    assert "<s>gone</s>" in html or "<del>gone</del>" in html
+
+
+def test_xss_sanitized():
+    html = render_markdown('<script>alert(1)</script>Hello')
+    assert "<script>" not in html
+    assert "Hello" in html

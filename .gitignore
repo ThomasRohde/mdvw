@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+build/
+dist/
+*.egg-info/
+*.spec.bak
+.coverage
+htmlcov/
+
+# reference material (not part of the new package)
+MDLook.exe
+_internal/

@@ -1,0 +1,83 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+# Top-level permissions are intentionally minimal. Elevated scopes are
+# granted per-job where actually needed.
+permissions: {}
+
+jobs:
+  build-wheel:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install hatch
+      - run: python scripts/fetch_vendor.py --verify
+      - run: hatch build
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pypi-dist
+          path: dist/*
+
+  build-exe:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -e .[dev]
+      - run: python scripts/fetch_vendor.py --verify
+      - run: pyinstaller packaging/mdvw.spec
+      - name: Zip onedir
+        shell: pwsh
+        run: Compress-Archive -Path dist/mdvw/* -DestinationPath dist/mdvw-win-x64.zip
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: win-exe
+          path: dist/mdvw-win-x64.zip
+
+  publish-pypi:
+    needs: [build-wheel, build-exe]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment:
+      # Protected environment — configure required reviewers + allowed tags
+      # in the GitHub UI so unreviewed tags cannot trigger a publish.
+      name: pypi
+      url: https://pypi.org/p/mdvw
+    permissions:
+      id-token: write       # OIDC for trusted publishing
+      contents: write       # required for action-gh-release asset upload
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: pypi-dist
+          path: pypi-dist/
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: win-exe
+          path: release-assets/
+      - uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # release/v1
+        with:
+          packages-dir: pypi-dist/
+          skip-existing: true
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          files: |
+            pypi-dist/*.whl
+            pypi-dist/*.tar.gz
+            release-assets/mdvw-win-x64.zip
+          generate_release_notes: true

@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="auto" data-mode="read">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{MD_NAME}} — mdvw</title>
+<link rel="stylesheet" href="vendor/katex/katex.min.css">
+<link rel="stylesheet" href="vendor/hljs/github.min.css" id="hljs-theme-light" disabled>
+<link rel="stylesheet" href="vendor/hljs/github-dark.min.css" id="hljs-theme-dark">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header id="toolbar">
+  <div class="brand">
+    <svg class="logo" viewBox="0 0 48 32" aria-hidden="true">
+      <ellipse cx="24" cy="16" rx="22" ry="12" fill="none" stroke="currentColor" stroke-width="2.5"/>
+      <circle cx="24" cy="16" r="6" fill="currentColor"/>
+    </svg>
+    <span class="wordmark">mdvw</span>
+    <span class="version">v{{MD_VERSION}}</span>
+  </div>
+
+  <div class="file-chip" id="file-chip" title="Current file">{{MD_NAME}}</div>
+
+  <div class="segmented" role="tablist" aria-label="View mode">
+    <button data-mode="read" class="seg active" role="tab" aria-selected="true">Read</button>
+    <button data-mode="edit" class="seg" role="tab" aria-selected="false">Edit</button>
+    <button data-mode="source" class="seg" role="tab" aria-selected="false">Source</button>
+  </div>
+
+  <div class="spacer"></div>
+
+  <div class="icon-bar">
+    <button id="btn-open" class="iconbtn" title="Open… (Ctrl+O)" aria-label="Open">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+    </button>
+    <button id="btn-save" class="iconbtn" title="Save (Ctrl+S)" aria-label="Save">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+    </button>
+    <button id="btn-width" class="iconbtn" title="Toggle width (Ctrl+Shift+W)" aria-label="Toggle width">
+      <svg viewBox="0 0 24 24" aria-hidden="true" class="icon-width-wide"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+      <svg viewBox="0 0 24 24" aria-hidden="true" class="icon-width-narrow" style="display:none"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"/></svg>
+    </button>
+    <button id="btn-help" class="iconbtn" title="Keyboard shortcuts" aria-label="Help">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M9.5 9.5a2.5 2.5 0 1 1 4.2 1.8c-.9.7-1.7 1.2-1.7 2.7"/><circle cx="12" cy="17" r="1" fill="currentColor"/></svg>
+    </button>
+    <button id="btn-theme" class="iconbtn" title="Theme" aria-label="Theme">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+    </button>
+  </div>
+</header>
+
+<main id="main">
+  <div id="split" class="split">
+    <textarea id="editor" spellcheck="false" aria-label="Markdown source"></textarea>
+    <div id="gutter" aria-hidden="true"></div>
+    <article id="preview" class="markdown-body">{{MD_HTML}}</article>
+  </div>
+
+  <aside id="outline-panel" hidden aria-label="Document outline">
+    <header>
+      <span>OUTLINE</span>
+      <button id="btn-outline-close" class="iconbtn" title="Close outline" aria-label="Close outline">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </header>
+    <nav id="outline-nav"></nav>
+  </aside>
+
+  <div id="rail" aria-hidden="false">
+    <button id="btn-outline" class="railbtn" title="Outline" aria-label="Outline">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M4 7h12M4 12h16M4 17h10"/></svg>
+    </button>
+    <button id="btn-collapse-all" class="railbtn rail-text" title="Collapse all (Ctrl+Shift+.)">▲ All</button>
+    <button id="btn-expand-all" class="railbtn rail-text" title="Expand all (Ctrl+Shift+,)">▼ All</button>
+    <button id="btn-auto-collapse" class="railbtn rail-text" title="Auto: collapse below top level">▶ Auto</button>
+  </div>
+</main>
+
+<dialog id="assoc-prompt">
+  <form method="dialog">
+    <h3>Make mdvw the default for .md files?</h3>
+    <p>Double-clicking Markdown files will open them here. Change later with <code>mdvw --unregister</code>.</p>
+    <menu>
+      <button value="no">Not now</button>
+      <button value="yes" autofocus>Yes, register</button>
+    </menu>
+  </form>
+</dialog>
+
+<dialog id="reload-conflict">
+  <form method="dialog">
+    <h3>File changed on disk</h3>
+    <p id="reload-conflict-msg">You have unsaved edits and the file was modified by another program.</p>
+    <menu>
+      <button value="keep">Keep my edits</button>
+      <button value="reload" autofocus>Discard &amp; reload</button>
+    </menu>
+  </form>
+</dialog>
+
+<dialog id="save-conflict">
+  <form method="dialog">
+    <h3>File changed on disk</h3>
+    <p>Another program modified this file since you opened it. Overwriting will lose those changes.</p>
+    <menu>
+      <button value="cancel">Cancel</button>
+      <button value="overwrite" autofocus>Overwrite</button>
+    </menu>
+  </form>
+</dialog>
+
+<dialog id="unsaved-prompt">
+  <form method="dialog">
+    <h3>Unsaved changes</h3>
+    <p>You have unsaved edits. Save them before opening another file?</p>
+    <menu>
+      <button value="cancel">Cancel</button>
+      <button value="discard">Discard</button>
+      <button value="save" autofocus>Save</button>
+    </menu>
+  </form>
+</dialog>
+
+<dialog id="help-dialog">
+  <form method="dialog">
+    <h3>Keyboard shortcuts</h3>
+    <table class="shortcuts">
+      <tr><td><kbd>Ctrl</kbd>+<kbd>1</kbd></td><td>Read mode</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>2</kbd></td><td>Edit (split) mode</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>3</kbd></td><td>Source mode</td></tr>
+      <tr><td><kbd>E</kbd></td><td>Cycle Read → Edit → Source</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>O</kbd></td><td>Open file</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>Save</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd></td><td>Toggle narrow/wide preview</td></tr>
+    </table>
+    <menu><button value="ok" autofocus>Close</button></menu>
+  </form>
+</dialog>
+
+<div id="toast"></div>
+
+<script type="application/json" id="md-source">{{MD_SOURCE}}</script>
+<script type="text/plain" id="md-name">{{MD_NAME}}</script>
+<script type="text/plain" id="md-folder">{{MD_FOLDER}}</script>
+<script type="text/plain" id="md-path">{{MD_PATH}}</script>
+<script type="text/plain" id="md-start-mode">{{MD_START_MODE}}</script>
+
+<script src="vendor/katex/katex.min.js"></script>
+<script src="vendor/katex/auto-render.min.js"></script>
+<script src="vendor/mermaid/mermaid.min.js"></script>
+<script src="vendor/hljs/highlight.min.js"></script>
+<script src="vendor/hljs/languages/python.min.js"></script>
+<script src="vendor/hljs/languages/typescript.min.js"></script>
+<script src="vendor/hljs/languages/javascript.min.js"></script>
+<script src="vendor/hljs/languages/rust.min.js"></script>
+<script src="vendor/hljs/languages/go.min.js"></script>
+<script src="vendor/hljs/languages/java.min.js"></script>
+<script src="vendor/hljs/languages/c.min.js"></script>
+<script src="vendor/hljs/languages/cpp.min.js"></script>
+<script src="vendor/hljs/languages/csharp.min.js"></script>
+<script src="vendor/hljs/languages/ruby.min.js"></script>
+<script src="vendor/hljs/languages/bash.min.js"></script>
+<script src="vendor/hljs/languages/json.min.js"></script>
+<script src="vendor/hljs/languages/yaml.min.js"></script>
+<script src="vendor/hljs/languages/sql.min.js"></script>
+<script src="vendor/hljs/languages/xml.min.js"></script>
+<script src="vendor/hljs/languages/css.min.js"></script>
+<script src="vendor/hljs/languages/markdown.min.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
