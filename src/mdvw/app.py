@@ -352,7 +352,25 @@ def _maybe_prompt_association(window: webview.Window) -> None:
     threading.Timer(1.2, _later).start()
 
 
+def _set_app_user_model_id() -> None:
+    """Give the process its own AUMID so the Windows taskbar groups mdvw
+    windows separately from the host Python.exe and uses our icon for
+    the group thumbnail.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "dev.ThomasRohde.mdvw"
+        )
+    except Exception as exc:
+        print(f"[mdvw] could not set AUMID: {exc!r}", file=sys.stderr)
+
+
 def run(file: Path | None, edit: bool, tray: bool) -> int:
+    _set_app_user_model_id()
     path, source = _initial_file(file)
 
     # Resolve the packaged assets dir and rewrite app-asset refs in the
@@ -392,27 +410,15 @@ def run(file: Path | None, edit: bool, tray: bool) -> int:
 
     window.events.loaded += _on_loaded
 
-    # Dirty-state guard: confirm before destroying if there are unsaved
-    # edits. We query JS *synchronously* via evaluate_js rather than
-    # reading the mirrored `api._dirty` attribute, because the JS→Python
-    # set_dirty() call is async — a user can type + close fast enough
-    # that Python never saw the dirty update.  Fail closed on any error.
+    # Dirty-state guard: the closing event runs on the UI thread, so we
+    # must NOT call evaluate_js here (that would block waiting on the
+    # same thread it was dispatched from and hang the window). Instead
+    # trust the `api._dirty` mirror updated by JS on each edit. There's
+    # a small race where a user types + closes faster than the bridge
+    # can mirror, but an unresponsive close is a worse UX than a rare
+    # missed prompt.
     def _on_closing() -> bool:
-        try:
-            js_dirty = window.evaluate_js(
-                "(typeof window.mdvwIsDirty === 'function') "
-                "? !!window.mdvwIsDirty() : false"
-            )
-        except Exception as exc:
-            # JS bridge unavailable → be pessimistic: block the close so
-            # the user can investigate rather than silently losing edits.
-            print(
-                f"[mdvw] could not read dirty state on close ({exc!r}); "
-                "blocking close.",
-                file=sys.stderr,
-            )
-            return False
-        if not js_dirty:
+        if not api._dirty:
             return True
         try:
             confirm = window.create_confirmation_dialog(
