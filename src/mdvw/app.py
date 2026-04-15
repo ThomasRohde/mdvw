@@ -150,6 +150,22 @@ def _atomic_write_text(path: Path, content: str) -> None:
         raise
 
 
+def _stderr_print(message: str) -> None:
+    """Best-effort diagnostic print to stderr.
+
+    Under `pythonw.exe` / a PyInstaller windowed build, `sys.stderr` is
+    `None`; a plain `print(..., file=sys.stderr)` would raise
+    `AttributeError: 'NoneType' object has no attribute 'write'` and take
+    down whatever code path emitted the diagnostic. Silently drop the
+    message in that case — it would have been invisible anyway.
+    """
+    stream = sys.stderr
+    if stream is None:
+        return
+    with contextlib.suppress(Exception):
+        print(message, file=stream)
+
+
 def _fingerprint(path: Path) -> tuple[int, int] | None:
     """Cheap (mtime_ns, size) fingerprint for concurrent-edit detection.
 
@@ -231,7 +247,7 @@ class JsApi:
         try:
             _atomic_write_text(path, content)
         except OSError as e:
-            print(f"[mdvw] save_file failed: {e}", file=sys.stderr)
+            _stderr_print(f"[mdvw] save_file failed: {e}")
             return {"status": "error", "message": str(e)}
         # Refresh fingerprint after successful write so the next save sees
         # this save as the new baseline.
@@ -432,7 +448,7 @@ def _set_window_icon(window: webview.Window, title: str) -> None:
         if small:
             user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, small)
     except Exception as exc:
-        print(f"[mdvw] could not set window icon: {exc!r}", file=sys.stderr)
+        _stderr_print(f"[mdvw] could not set window icon: {exc!r}")
 
 
 def _maybe_prompt_association(window: webview.Window) -> None:
@@ -462,7 +478,7 @@ def _set_app_user_model_id() -> None:
             "dev.ThomasRohde.mdvw"
         )
     except Exception as exc:
-        print(f"[mdvw] could not set AUMID: {exc!r}", file=sys.stderr)
+        _stderr_print(f"[mdvw] could not set AUMID: {exc!r}")
 
 
 def run(file: Path | None, edit: bool, tray: bool) -> int:
@@ -532,10 +548,9 @@ def run(file: Path | None, edit: bool, tray: bool) -> int:
                 "You have unsaved edits. Quit anyway?",
             )
         except Exception as exc:
-            print(
+            _stderr_print(
                 f"[mdvw] unable to show close confirmation ({exc!r}); "
-                "refusing close to protect unsaved edits.",
-                file=sys.stderr,
+                "refusing close to protect unsaved edits."
             )
             return False
         return bool(confirm)

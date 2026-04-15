@@ -3,6 +3,16 @@
 
 ## [Unreleased]
 
+### Fixed
+- `pip install mdvw` no longer generates a console-subsystem `mdvw.exe`
+  that flashes a cmd window on file-association or shortcut launch. The
+  entry moved from `[project.scripts]` to `[project.gui-scripts]`, so
+  pip produces a GUI-subsystem launcher instead. CLI diagnostics
+  (`--register`, `--version`, `--help`) still work via
+  `python -m mdvw …` from a terminal.
+- Stderr diagnostics no longer crash the save path or close handler
+  when launched under `pythonw.exe` or a PyInstaller windowed build
+  (where `sys.stderr is None`).
 
 ## [0.3.0] — 2026-04-15
 ### Changed

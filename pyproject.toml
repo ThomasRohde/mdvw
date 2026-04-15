@@ -44,7 +44,11 @@ dev = [
     "pyinstaller>=6.11",
 ]
 
-[project.scripts]
+[project.gui-scripts]
+# Windowed launcher on Windows — pip generates mdvw.exe with the GUI
+# subsystem, so double-clicking a .md file (or the Start-menu shortcut)
+# does not flash a cmd window. Diagnostic commands (`--register`,
+# `--version`, etc.) still work from a terminal via `python -m mdvw`.
 mdvw = "mdvw.cli:main"
 
 [project.urls]
