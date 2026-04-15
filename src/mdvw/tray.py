@@ -11,6 +11,8 @@ from PIL import Image
 if TYPE_CHECKING:
     import webview
 
+    from .app import JsApi
+
 _ICON_PATH = files(__package__) / "assets" / "icon.ico"
 
 _tray_icon = None
@@ -48,10 +50,16 @@ def _system_dark() -> bool:
         return False
 
 
-def start_tray(window: webview.Window) -> threading.Thread:
+_TOOLTIP_DEFAULT = "mdvw"
+_TOOLTIP_HIDDEN = "mdvw — running (right-click to quit)"
+
+
+def start_tray(window: webview.Window, api: JsApi | None = None) -> threading.Thread:
     """Start a pystray tray icon in a background thread.
 
     Left-click (default) shows the window; menu offers Show/Hide and Quit.
+    Quit is the sole exit path when tray is active, so it honors the
+    unsaved-changes guard that used to live on the window's X button.
     """
     if sys.platform != "win32":
         raise RuntimeError("Tray only supported on Windows")
@@ -66,12 +74,33 @@ def start_tray(window: webview.Window) -> threading.Thread:
             window.restore()
         except Exception:
             pass
+        with contextlib.suppress(Exception):
+            icon.title = _TOOLTIP_DEFAULT
 
     def on_hide(icon, item):
         with contextlib.suppress(Exception):
             window.hide()
+        with contextlib.suppress(Exception):
+            icon.title = _TOOLTIP_HIDDEN
 
     def on_quit(icon, item):
+        if api is not None and getattr(api, "_dirty", False):
+            # Make sure the confirmation has a visible parent — prompting
+            # over an empty desktop with no window context is disorienting.
+            with contextlib.suppress(Exception):
+                window.show()
+                window.restore()
+            try:
+                confirm = window.create_confirmation_dialog(
+                    "Unsaved changes",
+                    "You have unsaved edits. Quit anyway?",
+                )
+            except Exception:
+                # If the dialog fails, refuse to quit — losing edits is
+                # worse than a stuck-feeling tray.
+                return
+            if not confirm:
+                return
         icon.visible = False
         icon.stop()
         with contextlib.suppress(Exception):
@@ -83,7 +112,7 @@ def start_tray(window: webview.Window) -> threading.Thread:
         Menu.SEPARATOR,
         MenuItem("Quit", on_quit),
     )
-    icon = pystray.Icon("mdvw", _make_icon(_system_dark()), "mdvw", menu)
+    icon = pystray.Icon("mdvw", _make_icon(_system_dark()), _TOOLTIP_DEFAULT, menu)
     _tray_icon = icon
 
     def _theme_watcher() -> None:

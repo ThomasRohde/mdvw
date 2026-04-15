@@ -482,6 +482,17 @@ def _set_app_user_model_id() -> None:
 
 
 def run(file: Path | None, edit: bool, tray: bool) -> int:
+    # Single-instance handoff — only when the tray is on, because that's
+    # the only config where an existing process is actually kept alive
+    # across invocations. Without the tray, X destroys the window and
+    # webview.start() returns, so there's never a server to hand off to.
+    if tray and sys.platform == "win32":
+        from .ipc import try_handoff
+
+        resolved = file.resolve() if file else None
+        if try_handoff(resolved):
+            return 0
+
     _set_app_user_model_id()
     path, source = _initial_file(file)
     browse_root: Path | None = None
@@ -532,6 +543,31 @@ def run(file: Path | None, edit: bool, tray: bool) -> int:
 
     window.events.loaded += _on_loaded
 
+    tray_thread = None
+    ipc_server = None
+    if tray and sys.platform == "win32":
+        from .tray import start_tray
+
+        tray_thread = start_tray(window, api)
+
+        from . import tray as tray_mod
+        from .ipc import start_server
+
+        def _on_remote_open(p: Path | None) -> None:
+            # Always pop the window forward so the user sees the handoff
+            # landed — matches what they'd expect from "open another file".
+            with contextlib.suppress(Exception):
+                window.show()
+                window.restore()
+            if tray_mod._tray_icon is not None:
+                with contextlib.suppress(Exception):
+                    tray_mod._tray_icon.title = "mdvw"
+            if p is not None and p.exists() and p.is_file():
+                with contextlib.suppress(Exception):
+                    api._load(p)
+
+        ipc_server = start_server(_on_remote_open)
+
     # Dirty-state guard: the closing event runs on the UI thread, so we
     # must NOT call evaluate_js here (that would block waiting on the
     # same thread it was dispatched from and hang the window). Instead
@@ -540,6 +576,13 @@ def run(file: Path | None, edit: bool, tray: bool) -> int:
     # can mirror, but an unresponsive close is a worse UX than a rare
     # missed prompt.
     def _on_closing() -> bool:
+        if tray_thread is not None:
+            # Close-to-tray: hide the window and veto the destroy. The
+            # buffer (and api._dirty) live on in the hidden window; the
+            # unsaved-changes prompt moves to the tray's Quit action.
+            with contextlib.suppress(Exception):
+                window.hide()
+            return False
         if not api._dirty:
             return True
         try:
@@ -557,12 +600,6 @@ def run(file: Path | None, edit: bool, tray: bool) -> int:
 
     window.events.closing += _on_closing
 
-    tray_thread = None
-    if tray and sys.platform == "win32":
-        from .tray import start_tray
-
-        tray_thread = start_tray(window)
-
     if file and file.exists() and not edit:
         from .watcher import start_watcher
 
@@ -576,6 +613,10 @@ def run(file: Path | None, edit: bool, tray: bool) -> int:
             index.unlink(missing_ok=True)
         with contextlib.suppress(OSError):
             instance_dir.rmdir()
+        if ipc_server is not None:
+            from .ipc import stop_server
+
+            stop_server(ipc_server)
         if tray_thread is not None:
             from .tray import stop_tray
 

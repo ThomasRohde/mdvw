@@ -3,6 +3,22 @@
 
 ## [Unreleased]
 
+### Changed
+- **Close-to-tray.** Clicking the window's **X** now hides the window
+  instead of exiting, when the tray icon is running. The process stays
+  alive so a subsequent `mdvw file.md` is effectively instant. Quit is
+  the tray's right-click → **Quit** (moves the unsaved-changes prompt
+  there). Tooltip updates to "mdvw — running (right-click to quit)"
+  while hidden. `--no-tray` preserves the previous X-exits behavior.
+
+### Features
+- **Single-instance handoff.** A second `mdvw foo.md` invocation no
+  longer spawns a duplicate tray icon: it hands the file path to the
+  already-running instance over a loopback socket (`127.0.0.1`, port
+  recorded in `%APPDATA%\mdvw\instance.lock`) and exits. The running
+  instance pops the window forward and loads the new file. Stale
+  lockfiles are detected via connect-refused and cleared. Windows +
+  tray only; `--no-tray` opts out entirely.
 
 ## [0.3.2] — 2026-04-15
 ### Fixed
