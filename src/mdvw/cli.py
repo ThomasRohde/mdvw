@@ -24,7 +24,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.register or args.unregister:
         from .assoc import register, unregister
 
-        return register() if args.register else unregister()
+        return register(open_settings=True) if args.register else unregister()
 
     from .app import run
 

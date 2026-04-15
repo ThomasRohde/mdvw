@@ -3,6 +3,19 @@
 
 ## [Unreleased]
 
+### Fixed
+- File-association icons. `mdvw --register` now writes `DefaultIcon`
+  entries for the ProgID, `Applications\mdvw.exe`, and
+  `Capabilities\ApplicationIcon`, so `.md` files show mdvw's rocket in
+  Explorer and the "Open with" dialog no longer falls back to pip's
+  generic gui-launcher stub icon.
+- `mdvw --register` now opens Settings → Default apps preselected on
+  mdvw (`ms-settings:defaultapps?registeredAppUser=mdvw`) so the user
+  can flip the default in one step. Windows intentionally blocks apps
+  from setting themselves as default without explicit user consent.
+- `assoc.py` `print()` calls hardened against `sys.stdout is None`
+  (the in-app "register" prompt runs under a windowed launcher where
+  stdio is not attached).
 
 ## [0.3.1] — 2026-04-15
 ### Fixed
