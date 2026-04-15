@@ -1,8 +1,7 @@
 # Changelog
 
 
-## [Unreleased]
-
+## [0.3.2] — 2026-04-15
 ### Fixed
 - File-association icons. `mdvw --register` now writes `DefaultIcon`
   entries for the ProgID, `Applications\mdvw.exe`, and
