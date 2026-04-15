@@ -1,6 +1,9 @@
 # Changelog
 
 
+## [Unreleased]
+
+
 ## [0.3.1] — 2026-04-15
 ### Fixed
 - `pip install mdvw` no longer generates a console-subsystem `mdvw.exe`
