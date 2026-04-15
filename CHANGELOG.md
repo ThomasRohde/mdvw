@@ -1,8 +1,7 @@
 # Changelog
 
 
-## [Unreleased]
-
+## [0.4.0] — 2026-04-15
 ### Changed
 - **Close-to-tray.** Clicking the window's **X** now hides the window
   instead of exiting, when the tray icon is running. The process stays
