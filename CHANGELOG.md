@@ -1,8 +1,7 @@
 # Changelog
 
 
-## [Unreleased]
-
+## [0.3.0] — 2026-04-15
 ### Changed
 - File browser sidebar now loads lazily: only the launch directory's
   immediate children are fetched on open, and each subfolder is fetched
