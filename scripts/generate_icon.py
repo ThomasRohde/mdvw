@@ -16,7 +16,7 @@ OUT = ROOT / "src" / "mdvw" / "assets" / "icon.ico"
 
 
 def _draw_mark(size: int) -> Image.Image:
-    """Draw the Markdown mark at `size`×`size` on a transparent canvas."""
+    """Draw the Markdown mark at `size` x `size` on a transparent canvas."""
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
 
