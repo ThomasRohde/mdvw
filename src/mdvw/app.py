@@ -257,78 +257,66 @@ class JsApi:
             return True
         return False
 
-    def list_markdown_tree(self) -> dict | None:
-        """Walk the launch directory for .md/.markdown files and return a
-        pruned, sorted tree. Returns None when mdvw was launched with an
-        explicit file (no browse root configured).
+    _BROWSE_SKIP_DIRS = frozenset({
+        "node_modules", "__pycache__", ".venv", "venv",
+        "dist", "build", ".git", ".hg", ".svn", ".tox",
+        ".mypy_cache", ".pytest_cache", ".ruff_cache",
+    })
+
+    def list_markdown_dir(self, path_str: str = "") -> dict | None:
+        """List markdown files and subdirectories of a single directory.
+
+        Called lazily from the sidebar so large trees don't block the UI
+        on first paint — each folder's contents are fetched only when the
+        user expands it.
+
+        `path_str=""` means "the browse root". Any other value must be
+        a directory inside the browse root; path-traversal is rejected.
+        Returns `{"path": str, "entries": [...]}` or `None` on error.
         """
-        root = self._browse_root
-        if root is None:
+        if self._browse_root is None:
             return None
         try:
-            root = root.resolve()
+            root = self._browse_root.resolve()
         except OSError:
             return None
-        if not root.is_dir():
-            return None
-        skip_dirs = {
-            "node_modules", "__pycache__", ".venv", "venv",
-            "dist", "build", ".git", ".hg", ".svn", ".tox",
-            ".mypy_cache", ".pytest_cache", ".ruff_cache",
-        }
-        cap = 2000
-        count = 0
-        truncated = False
-        # Map of resolved-dir-path -> {"name": str, "files": list[Path], "children": dict}
-        tree_dirs: dict[Path, dict] = {
-            root: {"name": root.name or str(root), "files": [], "subdirs": {}}
-        }
-        for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
-            # Prune in place so os.walk skips them entirely.
-            dirnames[:] = [
-                d for d in dirnames
-                if not d.startswith(".") and d not in skip_dirs
-            ]
-            current = Path(dirpath)
-            node = tree_dirs.get(current)
-            if node is None:
-                continue
-            for fn in filenames:
-                if count >= cap:
-                    truncated = True
-                    break
-                suffix = Path(fn).suffix.lower()
-                if suffix not in (".md", ".markdown"):
-                    continue
-                node["files"].append(current / fn)
-                count += 1
-            if count >= cap:
-                truncated = True
-                break
-            # Pre-register child dirs so the next iteration can attach to them.
-            for d in dirnames:
-                child = current / d
-                child_node = {"name": d, "files": [], "subdirs": {}}
-                node["subdirs"][d] = child_node
-                tree_dirs[child] = child_node
-
-        def build(node: dict) -> dict | None:
-            children: list[dict] = []
-            for name in sorted(node["subdirs"], key=str.casefold):
-                sub = build(node["subdirs"][name])
-                if sub is not None:
-                    children.append(sub)
-            files = sorted(node["files"], key=lambda p: p.name.casefold())
-            for f in files:
-                children.append({"name": f.name, "path": str(f), "children": []})
-            if not children:
+        if path_str:
+            if not isinstance(path_str, str):
                 return None
-            return {"name": node["name"], "path": None, "children": children}
-
-        tree = build(tree_dirs[root]) or {
-            "name": root.name or str(root), "path": None, "children": []
-        }
-        return {"root": str(root), "tree": tree, "truncated": truncated}
+            try:
+                target = Path(path_str).resolve()
+            except OSError:
+                return None
+            if target != root and not target.is_relative_to(root):
+                return None
+        else:
+            target = root
+        if not target.is_dir():
+            return None
+        entries: list[dict] = []
+        try:
+            children = list(target.iterdir())
+        except OSError:
+            return None
+        # Dirs first, then files, each alphabetical case-insensitive.
+        children.sort(key=lambda p: (0 if p.is_dir() else 1, p.name.casefold()))
+        for child in children:
+            name = child.name
+            if name.startswith("."):
+                continue
+            try:
+                is_dir = child.is_dir()
+            except OSError:
+                continue
+            if is_dir:
+                if name in self._BROWSE_SKIP_DIRS:
+                    continue
+                entries.append({"type": "dir", "name": name, "path": str(child)})
+            else:
+                if child.suffix.lower() not in (".md", ".markdown"):
+                    continue
+                entries.append({"type": "file", "name": name, "path": str(child)})
+        return {"path": str(target), "entries": entries}
 
     def open_path(self, path_str: str) -> bool:
         """Load a file selected from the sidebar.

@@ -328,31 +328,57 @@ function setBrowserOpen(open) {
   }
 }
 
-function renderBrowserTree(node, parent) {
-  if (!node || !Array.isArray(node.children) || node.children.length === 0) return;
+function renderEntries(entries, parent) {
+  if (!Array.isArray(entries) || entries.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'browser-empty';
+    empty.textContent = '(empty)';
+    parent.appendChild(empty);
+    return;
+  }
   const ul = document.createElement('ul');
-  for (const child of node.children) {
+  for (const e of entries) {
     const li = document.createElement('li');
-    if (child.path) {
+    if (e.type === 'dir') {
+      const details = document.createElement('details');
+      details.dataset.path = e.path;
+      const summary = document.createElement('summary');
+      summary.textContent = e.name;
+      details.appendChild(summary);
+      // Lazy: only fetch children when the user actually expands the folder.
+      details.addEventListener('toggle', () => {
+        if (details.open && !details.dataset.loaded) loadDir(details);
+      });
+      li.appendChild(details);
+    } else {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'file-link';
-      btn.dataset.path = child.path;
-      btn.textContent = child.name;
-      btn.title = child.path;
+      btn.dataset.path = e.path;
+      btn.textContent = e.name;
+      btn.title = e.path;
       li.appendChild(btn);
-    } else {
-      const details = document.createElement('details');
-      details.open = true;
-      const summary = document.createElement('summary');
-      summary.textContent = child.name || '/';
-      details.appendChild(summary);
-      renderBrowserTree(child, details);
-      li.appendChild(details);
     }
     ul.appendChild(li);
   }
   parent.appendChild(ul);
+}
+
+async function loadDir(details) {
+  if (details.dataset.loaded) return;
+  details.dataset.loaded = '1';
+  const placeholder = document.createElement('div');
+  placeholder.className = 'browser-empty';
+  placeholder.textContent = 'Loading…';
+  details.appendChild(placeholder);
+  const api = await whenApiReady();
+  let result = null;
+  if (api && api.list_markdown_dir) {
+    try { result = await api.list_markdown_dir(details.dataset.path); }
+    catch { /* leave entries empty */ }
+  }
+  placeholder.remove();
+  renderEntries(result ? result.entries : [], details);
 }
 
 function whenApiReady() {
@@ -380,11 +406,11 @@ function whenApiReady() {
 async function loadBrowser() {
   if (browserLoaded) return;
   const api = await whenApiReady();
-  if (!api || !api.list_markdown_tree) return;
-  const result = await api.list_markdown_tree();
+  if (!api || !api.list_markdown_dir) return;
+  const result = await api.list_markdown_dir('');
   browserNav.innerHTML = '';
-  if (!result || !result.tree) {
-    browserNav.innerHTML = '<div class="browser-empty">No markdown files found.</div>';
+  if (!result) {
+    browserNav.innerHTML = '<div class="browser-empty">File browser unavailable.</div>';
     browserLoaded = true;
     return;
   }
@@ -393,22 +419,9 @@ async function loadBrowser() {
   rootInfo.style.fontFamily = 'var(--font-mono)';
   rootInfo.style.fontSize = '11.5px';
   rootInfo.style.wordBreak = 'break-all';
-  rootInfo.textContent = result.root;
+  rootInfo.textContent = result.path;
   browserNav.appendChild(rootInfo);
-  if (!result.tree.children || result.tree.children.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'browser-empty';
-    empty.textContent = 'No markdown files found.';
-    browserNav.appendChild(empty);
-  } else {
-    renderBrowserTree(result.tree, browserNav);
-  }
-  if (result.truncated) {
-    const t = document.createElement('div');
-    t.className = 'browser-truncated';
-    t.textContent = 'Listing truncated — too many files.';
-    browserNav.appendChild(t);
-  }
+  renderEntries(result.entries, browserNav);
   browserLoaded = true;
 }
 

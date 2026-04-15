@@ -418,53 +418,63 @@ def test_local_and_data_img_src_allowed():
     assert "data:image/png;base64," in html2
 
 
-def test_list_markdown_tree_none_without_browse_root():
-    """With no _browse_root, the tree API is unavailable (not an empty tree)."""
+def test_list_markdown_dir_none_without_browse_root():
+    """With no _browse_root, the dir API is unavailable."""
     api = app_mod.JsApi()
-    assert api.list_markdown_tree() is None
+    assert api.list_markdown_dir() is None
 
 
-def test_list_markdown_tree_prunes_and_sorts(tmp_path):
+def test_list_markdown_dir_root_filters_and_sorts(tmp_path):
     (tmp_path / "a.md").write_text("a", encoding="utf-8")
     (tmp_path / "B.markdown").write_text("b", encoding="utf-8")
     (tmp_path / "notes.txt").write_text("no", encoding="utf-8")
-    sub = tmp_path / "sub"
-    sub.mkdir()
-    (sub / "z.md").write_text("z", encoding="utf-8")
-    empty = tmp_path / "empty_dir"
-    empty.mkdir()
-    (empty / "x.txt").write_text("x", encoding="utf-8")  # no .md → pruned
-    hidden = tmp_path / ".git"
-    hidden.mkdir()
-    (hidden / "secret.md").write_text("no", encoding="utf-8")
-    nm = tmp_path / "node_modules"
-    nm.mkdir()
-    (nm / "pkg.md").write_text("no", encoding="utf-8")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "zz_later").mkdir()
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "node_modules").mkdir()
 
     api = app_mod.JsApi()
     api._browse_root = tmp_path
-    result = api.list_markdown_tree()
-
+    result = api.list_markdown_dir("")
     assert result is not None
-    assert result["truncated"] is False
-    names = []
+    names = [e["name"] for e in result["entries"]]
+    types = {e["name"]: e["type"] for e in result["entries"]}
+    # Hidden + denylist skipped; non-md file skipped.
+    assert ".git" not in names and "node_modules" not in names
+    assert "notes.txt" not in names
+    # Dirs before files, alpha case-insensitive within each group.
+    assert names == ["sub", "zz_later", "a.md", "B.markdown"]
+    assert types["sub"] == "dir" and types["a.md"] == "file"
 
-    def walk(node):
-        if node.get("path"):
-            names.append(node["name"])
-        for c in node.get("children", []):
-            walk(c)
 
-    walk(result["tree"])
-    # .git and node_modules are skipped; non-md ignored; empty_dir pruned.
-    assert "secret.md" not in names
-    assert "pkg.md" not in names
-    assert "a.md" in names and "B.markdown" in names and "z.md" in names
+def test_list_markdown_dir_loads_subdir_lazily(tmp_path):
+    sub = tmp_path / "docs"
+    sub.mkdir()
+    (sub / "intro.md").write_text("i", encoding="utf-8")
+    api = app_mod.JsApi()
+    api._browse_root = tmp_path
+    result = api.list_markdown_dir(str(sub))
+    assert result is not None
+    assert [e["name"] for e in result["entries"]] == ["intro.md"]
 
-    # Folders before files, case-insensitive alphabetical.
-    top = [c["name"] for c in result["tree"]["children"]]
-    assert top.index("sub") < top.index("a.md")
-    assert top.index("a.md") < top.index("B.markdown")  # 'a' < 'b' case-insensitive
+
+def test_list_markdown_dir_rejects_outside_root(tmp_path):
+    inside = tmp_path / "inside"
+    inside.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    api = app_mod.JsApi()
+    api._browse_root = inside
+    assert api.list_markdown_dir(str(outside)) is None
+
+
+def test_list_markdown_dir_rejects_traversal(tmp_path):
+    inside = tmp_path / "inside"
+    inside.mkdir()
+    api = app_mod.JsApi()
+    api._browse_root = inside
+    # `inside/../` resolves to tmp_path — outside the browse root.
+    assert api.list_markdown_dir(str(inside / "..")) is None
 
 
 def test_open_path_rejects_outside_root(tmp_path):

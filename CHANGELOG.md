@@ -3,6 +3,12 @@
 
 ## [Unreleased]
 
+### Changed
+- File browser sidebar now loads lazily: only the launch directory's
+  immediate children are fetched on open, and each subfolder is fetched
+  on first expand. Eliminates the multi-second stall when starting
+  `mdvw` in a large tree. Folders render collapsed by default.
+
 ## [0.2.0] — 2026-04-15
 <!-- Add notes for the next release here. `scripts/release.py VERSION`
      will rename this section to `[VERSION] — YYYY-MM-DD`, bump
