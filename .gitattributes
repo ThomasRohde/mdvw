@@ -1,0 +1,18 @@
+# Vendored third-party assets are hash-pinned via src/mdvw/assets/vendor/manifest.json.
+# Git must never normalize their line endings or any other bytes, or the
+# SHA256 check in CI will fail on Windows checkouts (CRLF conversion).
+src/mdvw/assets/vendor/** -text
+src/mdvw/assets/icon.ico binary
+
+# Our own source keeps LF in the repo but may be checked out with native
+# line endings.
+* text=auto eol=lf
+*.py text eol=lf
+*.js text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf
+*.json text eol=lf
