@@ -1,7 +1,6 @@
 # Changelog
 
-## [Unreleased]
-
+## [0.2.0] — 2026-04-15
 <!-- Add notes for the next release here. `scripts/release.py VERSION`
      will rename this section to `[VERSION] — YYYY-MM-DD`, bump
      src/mdvw/__init__.py, commit, and tag. -->
