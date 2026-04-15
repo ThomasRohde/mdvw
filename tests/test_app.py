@@ -418,6 +418,108 @@ def test_local_and_data_img_src_allowed():
     assert "data:image/png;base64," in html2
 
 
+def test_list_markdown_tree_none_without_browse_root():
+    """With no _browse_root, the tree API is unavailable (not an empty tree)."""
+    api = app_mod.JsApi()
+    assert api.list_markdown_tree() is None
+
+
+def test_list_markdown_tree_prunes_and_sorts(tmp_path):
+    (tmp_path / "a.md").write_text("a", encoding="utf-8")
+    (tmp_path / "B.markdown").write_text("b", encoding="utf-8")
+    (tmp_path / "notes.txt").write_text("no", encoding="utf-8")
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    (sub / "z.md").write_text("z", encoding="utf-8")
+    empty = tmp_path / "empty_dir"
+    empty.mkdir()
+    (empty / "x.txt").write_text("x", encoding="utf-8")  # no .md → pruned
+    hidden = tmp_path / ".git"
+    hidden.mkdir()
+    (hidden / "secret.md").write_text("no", encoding="utf-8")
+    nm = tmp_path / "node_modules"
+    nm.mkdir()
+    (nm / "pkg.md").write_text("no", encoding="utf-8")
+
+    api = app_mod.JsApi()
+    api._browse_root = tmp_path
+    result = api.list_markdown_tree()
+
+    assert result is not None
+    assert result["truncated"] is False
+    names = []
+
+    def walk(node):
+        if node.get("path"):
+            names.append(node["name"])
+        for c in node.get("children", []):
+            walk(c)
+
+    walk(result["tree"])
+    # .git and node_modules are skipped; non-md ignored; empty_dir pruned.
+    assert "secret.md" not in names
+    assert "pkg.md" not in names
+    assert "a.md" in names and "B.markdown" in names and "z.md" in names
+
+    # Folders before files, case-insensitive alphabetical.
+    top = [c["name"] for c in result["tree"]["children"]]
+    assert top.index("sub") < top.index("a.md")
+    assert top.index("a.md") < top.index("B.markdown")  # 'a' < 'b' case-insensitive
+
+
+def test_open_path_rejects_outside_root(tmp_path):
+    inside = tmp_path / "inside"
+    inside.mkdir()
+    (inside / "ok.md").write_text("ok", encoding="utf-8")
+    outside = tmp_path / "outside.md"
+    outside.write_text("no", encoding="utf-8")
+
+    api = app_mod.JsApi()
+    api._browse_root = inside
+    api._window = MagicMock()
+
+    assert api.open_path(str(outside)) is False
+    assert api._window.evaluate_js.call_count == 0
+
+
+def test_open_path_rejects_traversal(tmp_path):
+    inside = tmp_path / "inside"
+    inside.mkdir()
+    (tmp_path / "secret.md").write_text("x", encoding="utf-8")
+
+    api = app_mod.JsApi()
+    api._browse_root = inside
+    api._window = MagicMock()
+
+    traversal = str(inside / ".." / "secret.md")
+    assert api.open_path(traversal) is False
+    assert api._window.evaluate_js.call_count == 0
+
+
+def test_open_path_rejects_non_markdown_suffix(tmp_path):
+    (tmp_path / "notes.txt").write_text("x", encoding="utf-8")
+    api = app_mod.JsApi()
+    api._browse_root = tmp_path
+    api._window = MagicMock()
+
+    assert api.open_path(str(tmp_path / "notes.txt")) is False
+    assert api._window.evaluate_js.call_count == 0
+
+
+def test_open_path_loads_valid_in_root_file(tmp_path):
+    doc = tmp_path / "doc.md"
+    doc.write_text("# hi", encoding="utf-8")
+    api = app_mod.JsApi()
+    api._browse_root = tmp_path
+    api._window = MagicMock()
+
+    assert api.open_path(str(doc)) is True
+    assert api._current_path == doc.resolve()
+    call = api._window.evaluate_js.call_args[0][0]
+    assert '"reason": "open"' in call
+    assert '"name": "doc.md"' in call
+
+
 def test_vendor_manifest_matches_on_disk():
     """Release-time integrity: committed vendor files match the manifest hashes."""
     import subprocess

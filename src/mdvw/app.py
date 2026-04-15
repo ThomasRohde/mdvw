@@ -86,7 +86,13 @@ def _rewrite_app_asset_urls(template: str, assets_base: str) -> str:
     return _APP_ASSET_ATTR_RE.sub(_sub, template)
 
 
-def _build_html(source: str, path: Path | None, edit: bool, assets_base: str = "") -> str:
+def _build_html(
+    source: str,
+    path: Path | None,
+    edit: bool,
+    assets_base: str = "",
+    browse_root: Path | None = None,
+) -> str:
     """Render the template with the given source embedded.
 
     `assets_base` is an absolute URL (with trailing slash) pointing at the
@@ -112,6 +118,7 @@ def _build_html(source: str, path: Path | None, edit: bool, assets_base: str = "
         .replace("{{MD_FOLDER}}", folder)
         .replace("{{MD_PATH}}", path_str)
         .replace("{{MD_START_MODE}}", "edit" if edit else "read")
+        .replace("{{MD_BROWSE_ROOT}}", str(browse_root) if browse_root else "")
         .replace("{{MD_VERSION}}", __version__)
     )
 
@@ -171,6 +178,10 @@ class JsApi:
         # Mirrored from JS via set_dirty() so native close/quit paths can
         # show a "discard edits?" prompt without round-tripping to JS.
         self._dirty: bool = False
+        # Directory mdvw was launched in, when no file arg was provided.
+        # Populated by run(). None means "single-file launch"; the file
+        # browser sidebar is only offered when this is set.
+        self._browse_root: Path | None = None
 
     def set_dirty(self, value: bool) -> None:
         self._dirty = bool(value)
@@ -245,6 +256,103 @@ class JsApi:
             webbrowser.open(url, new=2)
             return True
         return False
+
+    def list_markdown_tree(self) -> dict | None:
+        """Walk the launch directory for .md/.markdown files and return a
+        pruned, sorted tree. Returns None when mdvw was launched with an
+        explicit file (no browse root configured).
+        """
+        root = self._browse_root
+        if root is None:
+            return None
+        try:
+            root = root.resolve()
+        except OSError:
+            return None
+        if not root.is_dir():
+            return None
+        skip_dirs = {
+            "node_modules", "__pycache__", ".venv", "venv",
+            "dist", "build", ".git", ".hg", ".svn", ".tox",
+            ".mypy_cache", ".pytest_cache", ".ruff_cache",
+        }
+        cap = 2000
+        count = 0
+        truncated = False
+        # Map of resolved-dir-path -> {"name": str, "files": list[Path], "children": dict}
+        tree_dirs: dict[Path, dict] = {
+            root: {"name": root.name or str(root), "files": [], "subdirs": {}}
+        }
+        for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+            # Prune in place so os.walk skips them entirely.
+            dirnames[:] = [
+                d for d in dirnames
+                if not d.startswith(".") and d not in skip_dirs
+            ]
+            current = Path(dirpath)
+            node = tree_dirs.get(current)
+            if node is None:
+                continue
+            for fn in filenames:
+                if count >= cap:
+                    truncated = True
+                    break
+                suffix = Path(fn).suffix.lower()
+                if suffix not in (".md", ".markdown"):
+                    continue
+                node["files"].append(current / fn)
+                count += 1
+            if count >= cap:
+                truncated = True
+                break
+            # Pre-register child dirs so the next iteration can attach to them.
+            for d in dirnames:
+                child = current / d
+                child_node = {"name": d, "files": [], "subdirs": {}}
+                node["subdirs"][d] = child_node
+                tree_dirs[child] = child_node
+
+        def build(node: dict) -> dict | None:
+            children: list[dict] = []
+            for name in sorted(node["subdirs"], key=str.casefold):
+                sub = build(node["subdirs"][name])
+                if sub is not None:
+                    children.append(sub)
+            files = sorted(node["files"], key=lambda p: p.name.casefold())
+            for f in files:
+                children.append({"name": f.name, "path": str(f), "children": []})
+            if not children:
+                return None
+            return {"name": node["name"], "path": None, "children": children}
+
+        tree = build(tree_dirs[root]) or {
+            "name": root.name or str(root), "path": None, "children": []
+        }
+        return {"root": str(root), "tree": tree, "truncated": truncated}
+
+    def open_path(self, path_str: str) -> bool:
+        """Load a file selected from the sidebar.
+
+        Validates that the path lies under `self._browse_root` and has a
+        markdown suffix. Rejects anything else so a hostile caller (or a
+        bug in the frontend) can't coerce an arbitrary disk read through
+        this bridge method.
+        """
+        if self._browse_root is None or not isinstance(path_str, str) or not path_str:
+            return False
+        try:
+            candidate = Path(path_str).resolve()
+            root = self._browse_root.resolve()
+        except OSError:
+            return False
+        if not candidate.is_relative_to(root):
+            return False
+        if candidate.suffix.lower() not in (".md", ".markdown"):
+            return False
+        if not candidate.is_file():
+            return False
+        self._load(candidate)
+        return True
 
     def open_file(self) -> bool:
         if self._window is None:
@@ -372,6 +480,11 @@ def _set_app_user_model_id() -> None:
 def run(file: Path | None, edit: bool, tray: bool) -> int:
     _set_app_user_model_id()
     path, source = _initial_file(file)
+    browse_root: Path | None = None
+    try:
+        browse_root = Path.cwd().resolve()
+    except OSError:
+        browse_root = None
 
     # Resolve the packaged assets dir and rewrite app-asset refs in the
     # template to absolute URLs rooted there. This avoids a document-wide
@@ -379,7 +492,11 @@ def run(file: Path | None, edit: bool, tray: bool) -> int:
     # URLs (./image.png, ./other.md) to the assets dir.
     assets_dir = Path(str(ASSETS)).resolve()
     assets_base = assets_dir.as_uri().rstrip("/") + "/"
-    html = _build_html(source, path, edit, assets_base=assets_base)
+    html = _build_html(
+        source, path, edit,
+        assets_base=assets_base,
+        browse_root=browse_root,
+    )
 
     # Per-instance temp file in a user-writable location — not the package
     # dir (which may be read-only in installed envs) and with a unique
@@ -390,6 +507,7 @@ def run(file: Path | None, edit: bool, tray: bool) -> int:
 
     api = JsApi()
     api._current_path = path
+    api._browse_root = browse_root
     if path is not None:
         api._loaded_fingerprint = _fingerprint(path)
 

@@ -19,6 +19,7 @@ const bootstrapEl = (id) =>
 const mdSource = JSON.parse(bootstrapEl('md-source').textContent || '""');
 const mdPath = bootstrapEl('md-path').textContent.trim();
 const startMode = (bootstrapEl('md-start-mode').textContent.trim() || 'read');
+const browseRoot = (bootstrapEl('md-browse-root')?.textContent || '').trim();
 
 const getApi = () => (window.pywebview && window.pywebview.api) || null;
 
@@ -308,6 +309,139 @@ document.getElementById('btn-auto-collapse').addEventListener('click', () => {
   document.getElementById('btn-auto-collapse').classList.toggle('active', autoCollapseActive);
   if (autoCollapseActive) applyAutoCollapse(preview); else expandAll(preview);
 });
+
+// ---------- File browser (only when launched without a file arg) ----------
+
+const browserPanel = document.getElementById('browser-panel');
+const browserNav = document.getElementById('browser-nav');
+const btnFiles = document.getElementById('btn-files');
+let browserLoaded = false;
+
+function setBrowserOpen(open) {
+  browserPanel.hidden = !open;
+  btnFiles.classList.toggle('active', open);
+  if (open) {
+    // Opening the left drawer closes the right outline drawer so they
+    // don't both claim the sides simultaneously on narrow windows.
+    outlinePanel.hidden = true;
+    document.getElementById('btn-outline').classList.remove('active');
+  }
+}
+
+function renderBrowserTree(node, parent) {
+  if (!node || !Array.isArray(node.children) || node.children.length === 0) return;
+  const ul = document.createElement('ul');
+  for (const child of node.children) {
+    const li = document.createElement('li');
+    if (child.path) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'file-link';
+      btn.dataset.path = child.path;
+      btn.textContent = child.name;
+      btn.title = child.path;
+      li.appendChild(btn);
+    } else {
+      const details = document.createElement('details');
+      details.open = true;
+      const summary = document.createElement('summary');
+      summary.textContent = child.name || '/';
+      details.appendChild(summary);
+      renderBrowserTree(child, details);
+      li.appendChild(details);
+    }
+    ul.appendChild(li);
+  }
+  parent.appendChild(ul);
+}
+
+function whenApiReady() {
+  // pywebview injects `window.pywebview.api` asynchronously and fires a
+  // `pywebviewready` event. During module init the API can still be null;
+  // fall back to a short poll so we don't silently drop the call.
+  return new Promise((resolve) => {
+    if (getApi()) { resolve(getApi()); return; }
+    const done = () => {
+      window.removeEventListener('pywebviewready', done);
+      resolve(getApi());
+    };
+    window.addEventListener('pywebviewready', done, { once: true });
+    // Safety net in case the event already fired before we listened.
+    let tries = 0;
+    const tick = () => {
+      if (getApi()) { window.removeEventListener('pywebviewready', done); resolve(getApi()); return; }
+      if (tries++ < 50) setTimeout(tick, 40);
+      else resolve(null);
+    };
+    setTimeout(tick, 40);
+  });
+}
+
+async function loadBrowser() {
+  if (browserLoaded) return;
+  const api = await whenApiReady();
+  if (!api || !api.list_markdown_tree) return;
+  const result = await api.list_markdown_tree();
+  browserNav.innerHTML = '';
+  if (!result || !result.tree) {
+    browserNav.innerHTML = '<div class="browser-empty">No markdown files found.</div>';
+    browserLoaded = true;
+    return;
+  }
+  const rootInfo = document.createElement('div');
+  rootInfo.className = 'browser-empty';
+  rootInfo.style.fontFamily = 'var(--font-mono)';
+  rootInfo.style.fontSize = '11.5px';
+  rootInfo.style.wordBreak = 'break-all';
+  rootInfo.textContent = result.root;
+  browserNav.appendChild(rootInfo);
+  if (!result.tree.children || result.tree.children.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'browser-empty';
+    empty.textContent = 'No markdown files found.';
+    browserNav.appendChild(empty);
+  } else {
+    renderBrowserTree(result.tree, browserNav);
+  }
+  if (result.truncated) {
+    const t = document.createElement('div');
+    t.className = 'browser-truncated';
+    t.textContent = 'Listing truncated — too many files.';
+    browserNav.appendChild(t);
+  }
+  browserLoaded = true;
+}
+
+browserNav.addEventListener('click', async (e) => {
+  const btn = e.target && e.target.closest ? e.target.closest('.file-link') : null;
+  if (!btn) return;
+  e.preventDefault();
+  const path = btn.dataset.path;
+  if (!path) return;
+  if (!(await confirmDiscardIfDirty())) return;
+  const api = getApi();
+  if (!api || !api.open_path) return;
+  const ok = await api.open_path(path);
+  if (ok) {
+    browserNav.querySelectorAll('.file-link.active').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    setBrowserOpen(false);
+  } else {
+    flash('Could not open file');
+  }
+});
+
+btnFiles.addEventListener('click', async () => {
+  if (!browseRoot) { flash('File browser unavailable'); return; }
+  const willOpen = browserPanel.hidden;
+  if (willOpen) await loadBrowser();
+  setBrowserOpen(willOpen);
+});
+document.getElementById('btn-browser-close').addEventListener('click', () => setBrowserOpen(false));
+// Auto-open the sidebar on first paint when no specific file was passed.
+if (browseRoot && !mdPath) {
+  loadBrowser().then(() => setBrowserOpen(true));
+}
 
 // ---------- Theme ----------
 
