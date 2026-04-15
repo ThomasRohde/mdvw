@@ -1,6 +1,9 @@
 # Changelog
 
 
+## [Unreleased]
+
+
 ## [0.3.2] — 2026-04-15
 ### Fixed
 - File-association icons. `mdvw --register` now writes `DefaultIcon`
