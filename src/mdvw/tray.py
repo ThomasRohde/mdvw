@@ -3,25 +3,39 @@ from __future__ import annotations
 import contextlib
 import sys
 import threading
+from importlib.resources import files
 from typing import TYPE_CHECKING
 
-from PIL import Image, ImageDraw
+from PIL import Image
 
 if TYPE_CHECKING:
     import webview
+
+_ICON_PATH = files(__package__) / "assets" / "icon.ico"
 
 _tray_icon = None
 _tray_thread: threading.Thread | None = None
 
 
 def _make_icon(dark: bool) -> Image.Image:
-    size = 64
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    bg = (201, 100, 66, 255) if not dark else (224, 128, 96, 255)
-    d.rounded_rectangle((2, 2, size - 2, size - 2), radius=12, fill=bg)
-    # "M" glyph
-    d.text((16, 8), "M", fill=(255, 255, 255, 255))
+    """Load the packaged Markdown-mark icon, invert for dark taskbars.
+
+    The tray area on Windows is usually dark on light mode and light on
+    dark mode, so invert the glyph when the system is in dark mode so
+    the M↓ mark stays visible.
+    """
+    img = Image.open(str(_ICON_PATH))
+    try:
+        img.size = (32, 32)
+        img.load()
+    except Exception:
+        pass
+    img = img.convert("RGBA")
+    if dark:
+        # Invert RGB channels (keep alpha). Black glyph → white glyph.
+        r, g, b, a = img.split()
+        inv = Image.merge("RGB", (r, g, b)).point(lambda v: 255 - v).split()
+        img = Image.merge("RGBA", (*inv, a))
     return img
 
 
