@@ -303,6 +303,42 @@ class JsApi:
             self._window.evaluate_js(f"window.mdvwSetDocument({payload})")
 
 
+def _set_window_icon(window: webview.Window, title: str) -> None:
+    """Attach the packaged icon.ico to the running window via WM_SETICON.
+
+    pywebview 5.x exposes no icon parameter on Windows; without this the
+    taskbar/titlebar keep the host exe's icon (Python.exe during dev).
+    We look up the HWND by the window's current title and send two icon
+    handles (big + small). Failure is non-fatal — the window just keeps
+    the default icon.
+    """
+    if sys.platform != "win32":
+        return
+    ico = Path(str(ASSETS)).resolve() / "icon.ico"
+    if not ico.exists():
+        return
+    try:
+        import ctypes
+
+        user32 = ctypes.windll.user32
+        LR_LOADFROMFILE = 0x00000010
+        IMAGE_ICON = 1
+        WM_SETICON = 0x0080
+        ICON_SMALL, ICON_BIG = 0, 1
+
+        hwnd = user32.FindWindowW(None, title)
+        if not hwnd:
+            return
+        big = user32.LoadImageW(None, str(ico), IMAGE_ICON, 256, 256, LR_LOADFROMFILE)
+        small = user32.LoadImageW(None, str(ico), IMAGE_ICON, 16, 16, LR_LOADFROMFILE)
+        if big:
+            user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, big)
+        if small:
+            user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, small)
+    except Exception as exc:
+        print(f"[mdvw] could not set window icon: {exc!r}", file=sys.stderr)
+
+
 def _maybe_prompt_association(window: webview.Window) -> None:
     if sys.platform != "win32":
         return
@@ -339,8 +375,9 @@ def run(file: Path | None, edit: bool, tray: bool) -> int:
     if path is not None:
         api._loaded_fingerprint = _fingerprint(path)
 
+    window_title = f"{path.name if path else 'mdvw'} — mdvw"
     window = webview.create_window(
-        title=f"{path.name if path else 'mdvw'} — mdvw",
+        title=window_title,
         url=index.as_uri(),
         js_api=api,
         width=1100,
@@ -348,7 +385,12 @@ def run(file: Path | None, edit: bool, tray: bool) -> int:
         min_size=(600, 400),
     )
     api._window = window
-    window.events.loaded += lambda: _maybe_prompt_association(window)
+
+    def _on_loaded() -> None:
+        _set_window_icon(window, window_title)
+        _maybe_prompt_association(window)
+
+    window.events.loaded += _on_loaded
 
     # Dirty-state guard: confirm before destroying if there are unsaved
     # edits. We query JS *synchronously* via evaluate_js rather than

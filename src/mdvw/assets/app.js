@@ -439,10 +439,17 @@ async function rerender() {
 
 const reloadDialog = document.getElementById('reload-conflict');
 
-async function applyExternalDocument({ html: htmlOut, source, name }) {
+async function applyExternalDocument({ html: htmlOut, source, name, path }) {
   currentSource = source;
   setDirty(false);
-  if (name) { fileChip.textContent = name; document.title = `${name} — mdvw`; }
+  if (path) {
+    fileChip.textContent = path;
+    fileChip.title = path;
+  } else if (name) {
+    fileChip.textContent = name;
+    fileChip.title = name;
+  }
+  if (name) document.title = `${name} — mdvw`;
   if (currentMode === 'edit' || currentMode === 'source') editor.value = source;
   preview.innerHTML = htmlOut;
   await enhance(preview);

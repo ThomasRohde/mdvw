@@ -11,24 +11,13 @@
 </head>
 <body>
 <header id="toolbar">
-  <div class="brand">
-    <svg class="logo" viewBox="0 0 48 32" aria-hidden="true">
-      <ellipse cx="24" cy="16" rx="22" ry="12" fill="none" stroke="currentColor" stroke-width="2.5"/>
-      <circle cx="24" cy="16" r="6" fill="currentColor"/>
-    </svg>
-    <span class="wordmark">mdvw</span>
-    <span class="version">v{{MD_VERSION}}</span>
-  </div>
-
-  <div class="file-chip" id="file-chip" title="Current file">{{MD_NAME}}</div>
+  <div class="file-chip" id="file-chip" title="{{MD_PATH}}">{{MD_PATH}}</div>
 
   <div class="segmented" role="tablist" aria-label="View mode">
     <button data-mode="read" class="seg active" role="tab" aria-selected="true">Read</button>
     <button data-mode="edit" class="seg" role="tab" aria-selected="false">Edit</button>
     <button data-mode="source" class="seg" role="tab" aria-selected="false">Source</button>
   </div>
-
-  <div class="spacer"></div>
 
   <div class="icon-bar">
     <button id="btn-open" class="iconbtn" title="Open… (Ctrl+O)" aria-label="Open">
