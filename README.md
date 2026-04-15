@@ -29,6 +29,20 @@ mdvw --unregister          # remove association
 
 Shortcuts: `E` toggle edit, `Ctrl+S` save, `Ctrl+O` open.
 
+## Releasing
+
+```bash
+# 1. Write notes under `## [Unreleased]` in CHANGELOG.md, commit them.
+# 2. Cut the release (bumps version + renames changelog section + tags on
+#    the same commit so tag and PyPI artifact point at identical source):
+python scripts/release.py 0.2.0
+git push origin main v0.2.0   # triggers release.yml → PyPI + GH Release
+
+# 3. Open the next dev cycle:
+python scripts/release.py --post-release 0.3.0.dev0
+git push origin main
+```
+
 ## License
 
 MIT
