@@ -289,9 +289,8 @@ function expandAll(root) {
   for (const h of root.querySelectorAll('h1,h2,h3,h4,h5,h6')) toggleHeading(h, false);
 }
 function applyAutoCollapse(root) {
-  // Expand h1, collapse h2+
-  for (const h of root.querySelectorAll('h2,h3,h4,h5,h6')) toggleHeading(h, true);
   for (const h of root.querySelectorAll('h1')) toggleHeading(h, false);
+  for (const h of root.querySelectorAll('h2,h3,h4,h5,h6')) toggleHeading(h, true);
 }
 
 document.getElementById('btn-collapse-all').addEventListener('click', () => {
