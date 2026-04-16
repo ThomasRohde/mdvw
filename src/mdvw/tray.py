@@ -101,6 +101,8 @@ def start_tray(window: webview.Window, api: JsApi | None = None) -> threading.Th
                 return
             if not confirm:
                 return
+        if api is not None:
+            api._quitting = True
         icon.visible = False
         icon.stop()
         with contextlib.suppress(Exception):

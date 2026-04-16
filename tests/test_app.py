@@ -59,6 +59,40 @@ def test_atomic_write_replaces_content(tmp_path):
     assert target.read_text(encoding="utf-8") == "new content with unicode: \u2603"
 
 
+def test_build_html_renders_frontmatter_card():
+    source = "---\ntitle: Hello\nauthor: me\n---\n# Body\n"
+    out = app_mod._build_html(source, None, False)
+    assert 'class="md-frontmatter"' in out
+    assert "title: Hello" in out
+    # Raw YAML keys must not leak through as paragraph text.
+    assert "<p>title: Hello" not in out
+    assert "<h1>Body</h1>" in out
+
+
+def test_jsapi_render_markdown_includes_frontmatter_card():
+    api = app_mod.JsApi()
+    html = api.render_markdown("---\nkey: val\n---\nhello\n")
+    assert "md-frontmatter" in html
+    assert "key: val" in html
+    assert "<p>hello</p>" in html
+
+
+def test_jsapi_render_markdown_shows_yaml_error():
+    api = app_mod.JsApi()
+    html = api.render_markdown("---\ntitle: [bad\n---\nstill body\n")
+    assert "md-frontmatter--error" in html
+    assert "still body" in html
+
+
+def test_save_file_roundtrips_frontmatter_verbatim(tmp_path):
+    """Editing the body must not mangle the user's YAML whitespace/quoting."""
+    api = app_mod.JsApi()
+    api._current_path = tmp_path / "doc.md"
+    source = "---\ntitle:   Hi   \ntags:\n  - one\n  - two\n---\n# Body\n"
+    assert api.save_file(source) == {"status": "ok"}
+    assert (tmp_path / "doc.md").read_text(encoding="utf-8") == source
+
+
 def test_save_file_without_window_returns_cancelled():
     """With no _window, save_file of a new doc must fail gracefully, not raise."""
     api = app_mod.JsApi()

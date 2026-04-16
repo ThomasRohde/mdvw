@@ -8,6 +8,7 @@ from markdown_it.rules_inline import StateInline
 from mdit_py_plugins.deflist import deflist_plugin
 from mdit_py_plugins.dollarmath import dollarmath_plugin
 from mdit_py_plugins.footnote import footnote_plugin
+from mdit_py_plugins.front_matter import front_matter_plugin
 from mdit_py_plugins.tasklists import tasklists_plugin
 
 
@@ -160,6 +161,7 @@ def _build_md() -> MarkdownIt:
         .use(deflist_plugin)
         .use(tasklists_plugin, enabled=True, label=True)
         .use(dollarmath_plugin, allow_labels=True, double_inline=True)
+        .use(front_matter_plugin)
     )
 
     md.inline.ruler.before("emphasis", "mdvw_mark", _mark_rule)
@@ -265,6 +267,32 @@ def _rewrite_relative_urls(html: str, doc_base: str) -> str:
         return f'{attr}="{base}{val}"'
 
     return _RELATIVE_HREF_RE.sub(_sub, html)
+
+
+def render_frontmatter_card(raw_yaml: str | None, error: str | None) -> str:
+    """Render a sanitized HTML card for YAML frontmatter.
+
+    *raw_yaml* is the verbatim text between the fences (no ``---``).
+    Pass ``(None, None)`` for "no frontmatter" — returns ``""``.
+    """
+    if error:
+        body = (
+            '<p class="md-frontmatter-title">Frontmatter error</p>'
+            f"<pre>{nh3.clean_text(error)}</pre>"
+        )
+        html = f'<section class="md-frontmatter md-frontmatter--error">{body}</section>'
+    elif raw_yaml is not None:
+        escaped = nh3.clean_text(raw_yaml.strip())
+        html = f'<section class="md-frontmatter"><pre>{escaped}</pre></section>'
+    else:
+        return ""
+    return nh3.clean(
+        html,
+        tags=_SANITIZE_TAGS,
+        attributes=_SANITIZE_ATTRS,
+        attribute_filter=_attribute_filter,
+        url_schemes={"http", "https", "mailto", "data"},
+    )
 
 
 def render_markdown(text: str, doc_base: str | None = None) -> str:

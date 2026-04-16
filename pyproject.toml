@@ -33,6 +33,7 @@ dependencies = [
     "Pillow>=11.0",
     "watchfiles>=1.0",
     "darkdetect>=0.8",
+    "pyyaml>=6.0",
     'pywin32>=308; sys_platform == "win32"',
 ]
 

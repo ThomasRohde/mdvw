@@ -1,4 +1,4 @@
-from mdvw.render import render_markdown
+from mdvw.render import render_frontmatter_card, render_markdown
 
 
 def test_basic_heading():
@@ -67,3 +67,35 @@ def test_xss_sanitized():
     html = render_markdown('<script>alert(1)</script>Hello')
     assert "<script>" not in html
     assert "Hello" in html
+
+
+def test_frontmatter_fence_hidden_from_body():
+    html = render_markdown("---\ntitle: Hi\n---\n# Body\n")
+    # Plugin should mark fence hidden so no stray <hr> or raw key text.
+    assert "<hr" not in html
+    assert "title:" not in html
+    assert "<h1>Body</h1>" in html
+
+
+def test_frontmatter_card_basic():
+    html = render_frontmatter_card("title: Hi\ntags: [a, b]", None)
+    assert 'class="md-frontmatter"' in html
+    assert "<pre>" in html
+    assert "title: Hi" in html
+    assert "tags: [a, b]" in html
+
+
+def test_frontmatter_card_error():
+    html = render_frontmatter_card(None, "bad yaml: x")
+    assert "md-frontmatter--error" in html
+    assert "bad yaml: x" in html
+
+
+def test_frontmatter_card_escapes_html_in_values():
+    html = render_frontmatter_card("evil: <script>alert(1)</script>", None)
+    assert "<script>" not in html
+    assert "alert(1)" in html
+
+
+def test_frontmatter_card_empty_returns_empty_string():
+    assert render_frontmatter_card(None, None) == ""

@@ -27,7 +27,19 @@ class _EmptySpamFilter(logging.Filter):
 logging.getLogger().addFilter(_EmptySpamFilter())
 
 from . import __version__, config  # noqa: E402  (must run after logger filter)
-from .render import render_markdown  # noqa: E402
+from .frontmatter import parse_frontmatter, split_frontmatter  # noqa: E402
+from .render import render_frontmatter_card, render_markdown  # noqa: E402
+
+
+def _render_with_frontmatter(source: str, doc_base: str | None = None) -> str:
+    """Render ``source`` to HTML, prepending a frontmatter card when present."""
+    raw_yaml, body = split_frontmatter(source)
+    if raw_yaml is not None:
+        _meta, _body, err = parse_frontmatter(source)
+        card = render_frontmatter_card(raw_yaml, err)
+    else:
+        card = ""
+    return card + render_markdown(body, doc_base=doc_base)
 
 ASSETS = files(__package__) / "assets"
 
@@ -109,7 +121,7 @@ def _build_html(
     folder = str(path.parent) if path else ""
     path_str = str(path) if path else ""
     doc_base = path.parent.resolve().as_uri() + "/" if path else None
-    html_body = render_markdown(source, doc_base=doc_base)
+    html_body = _render_with_frontmatter(source, doc_base=doc_base)
     return (
         template
         .replace("{{MD_HTML}}", html_body)
@@ -194,6 +206,7 @@ class JsApi:
         # Mirrored from JS via set_dirty() so native close/quit paths can
         # show a "discard edits?" prompt without round-tripping to JS.
         self._dirty: bool = False
+        self._quitting: bool = False
         # Directory mdvw was launched in, when no file arg was provided.
         # Populated by run(). None means "single-file launch"; the file
         # browser sidebar is only offered when this is set.
@@ -217,7 +230,7 @@ class JsApi:
         return True
 
     def render_markdown(self, text: str) -> str:
-        return render_markdown(text)
+        return _render_with_frontmatter(text)
 
     def save_file(self, content: str, force: bool = False) -> dict:
         """Save the current document atomically.
@@ -392,7 +405,7 @@ class JsApi:
 
     def _load(self, path: Path, reason: str = "open") -> None:
         source = path.read_text(encoding="utf-8")
-        html = render_markdown(source)
+        html = _render_with_frontmatter(source)
         self._current_path = path
         new_fp = _fingerprint(path)
         if reason == "watch":
@@ -576,6 +589,8 @@ def run(file: Path | None, edit: bool, tray: bool) -> int:
     # can mirror, but an unresponsive close is a worse UX than a rare
     # missed prompt.
     def _on_closing() -> bool:
+        if api._quitting:
+            return True
         if tray_thread is not None:
             # Close-to-tray: hide the window and veto the destroy. The
             # buffer (and api._dirty) live on in the hidden window; the

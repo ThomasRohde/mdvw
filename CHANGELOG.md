@@ -3,6 +3,21 @@
 
 ## [Unreleased]
 
+### Features
+- **YAML frontmatter card.** Markdown files with a `---`-fenced YAML
+  header now display the raw metadata in a styled card at the top of
+  the preview pane instead of rendering it as a thematic break and
+  paragraph text. Invalid YAML shows an error card; the body still
+  renders normally. Edit frontmatter in Source mode — original
+  formatting is preserved on save.
+
+### Fixed
+- **Tray quit hang.** Clicking Quit in the system tray no longer leaves
+  the Python process running. The `_on_closing` handler was vetoing
+  `window.destroy()` because it always treated tray mode as
+  "close-to-tray"; a `_quitting` flag now lets the tray's Quit action
+  bypass the veto.
+
 
 ## [0.4.0] — 2026-04-15
 ### Changed
