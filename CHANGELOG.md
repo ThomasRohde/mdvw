@@ -1,8 +1,7 @@
 # Changelog
 
 
-## [Unreleased]
-
+## [0.5.0] — 2026-04-16
 ### Features
 - **YAML frontmatter card.** Markdown files with a `---`-fenced YAML
   header now display the raw metadata in a styled card at the top of
