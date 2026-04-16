@@ -464,6 +464,56 @@ def _set_window_icon(window: webview.Window, title: str) -> None:
         _stderr_print(f"[mdvw] could not set window icon: {exc!r}")
 
 
+def _bring_to_front() -> None:
+    """Force our window to the foreground on Windows.
+
+    Finds the top-level window belonging to this process (by PID) and
+    does a brief TOPMOST toggle + SetForegroundWindow.  Works even when
+    the title has changed since creation.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        import ctypes.wintypes
+
+        user32 = ctypes.windll.user32
+        pid = os.getpid()
+        found_hwnd = None
+
+        WNDENUMPROC = ctypes.WINFUNCTYPE(
+            ctypes.wintypes.BOOL,
+            ctypes.wintypes.HWND,
+            ctypes.wintypes.LPARAM,
+        )
+
+        def _enum_cb(hwnd: int, _lp: int) -> bool:
+            nonlocal found_hwnd
+            wp = ctypes.wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(wp))
+            if wp.value == pid and user32.IsWindowVisible(hwnd):
+                found_hwnd = hwnd
+                return False
+            return True
+
+        user32.EnumWindows(WNDENUMPROC(_enum_cb), 0)
+        if not found_hwnd:
+            return
+
+        HWND_TOPMOST = -1
+        HWND_NOTOPMOST = -2
+        SWP_NOMOVE = 0x0002
+        SWP_NOSIZE = 0x0001
+        SWP_SHOWWINDOW = 0x0040
+        flags = SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW
+
+        user32.SetWindowPos(found_hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags)
+        user32.SetWindowPos(found_hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, flags)
+        user32.SetForegroundWindow(found_hwnd)
+    except Exception as exc:
+        _stderr_print(f"[mdvw] could not bring window to front: {exc!r}")
+
+
 def _maybe_prompt_association(window: webview.Window) -> None:
     if sys.platform != "win32":
         return
@@ -552,6 +602,7 @@ def run(file: Path | None, edit: bool, tray: bool) -> int:
 
     def _on_loaded() -> None:
         _set_window_icon(window, window_title)
+        _bring_to_front()
         _maybe_prompt_association(window)
 
     window.events.loaded += _on_loaded
@@ -572,6 +623,7 @@ def run(file: Path | None, edit: bool, tray: bool) -> int:
             with contextlib.suppress(Exception):
                 window.show()
                 window.restore()
+            _bring_to_front()
             if tray_mod._tray_icon is not None:
                 with contextlib.suppress(Exception):
                     tray_mod._tray_icon.title = "mdvw"

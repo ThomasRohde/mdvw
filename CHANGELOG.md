@@ -3,6 +3,13 @@
 
 ## [Unreleased]
 
+### Fixed
+- **Window opens behind Explorer.** Double-clicking a `.md` file in
+  Windows Explorer now reliably brings mdvw to the foreground — both on
+  first launch and on subsequent IPC hand-offs to the existing instance.
+  The short-lived client process grants foreground rights to the server
+  via `AllowSetForegroundWindow` before handing off.
+
 
 ## [0.5.0] — 2026-04-16
 ### Features

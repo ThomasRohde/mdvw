@@ -22,6 +22,7 @@ import contextlib
 import json
 import os
 import socket
+import sys
 import threading
 from collections.abc import Callable
 from pathlib import Path
@@ -70,7 +71,12 @@ def try_handoff(file: Path | None) -> bool:
     lock = _read_lock()
     if lock is None:
         return False
-    port, _pid = lock
+    port, pid = lock
+    if sys.platform == "win32":
+        with contextlib.suppress(Exception):
+            import ctypes
+
+            ctypes.windll.user32.AllowSetForegroundWindow(pid)
     payload = json.dumps({"path": str(file) if file else ""}) + "\n"
     try:
         with socket.create_connection((_HOST, port), timeout=1.0) as s:
