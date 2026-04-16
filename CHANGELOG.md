@@ -1,8 +1,7 @@
 # Changelog
 
 
-## [Unreleased]
-
+## [0.5.1] — 2026-04-16
 ### Fixed
 - **Window opens behind Explorer.** Double-clicking a `.md` file in
   Windows Explorer now reliably brings mdvw to the foreground — both on
