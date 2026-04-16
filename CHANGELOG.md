@@ -1,6 +1,9 @@
 # Changelog
 
 
+## [Unreleased]
+
+
 ## [0.5.0] — 2026-04-16
 ### Features
 - **YAML frontmatter card.** Markdown files with a `---`-fenced YAML
