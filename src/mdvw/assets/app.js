@@ -258,23 +258,42 @@ function toggleHeading(heading, collapsed) {
   const target = collapsed === undefined ? heading.dataset.collapsed !== 'true' : collapsed;
   heading.dataset.collapsed = target ? 'true' : 'false';
   let el = heading.nextElementSibling;
+  let skipUntil = 0;
   while (el) {
     const l = headingLevel(el);
     if (l && l <= lvl) break;
-    el.classList.toggle('mdvw-hidden', target);
+    if (target) {
+      el.classList.add('mdvw-hidden');
+    } else {
+      if (skipUntil) {
+        if (l && l <= skipUntil) skipUntil = 0;
+        else { el = el.nextElementSibling; continue; }
+      }
+      el.classList.remove('mdvw-hidden');
+      if (l && el.dataset.collapsed === 'true') skipUntil = l;
+    }
     el = el.nextElementSibling;
   }
 }
+
+function headingKey(h) {
+  return h.id || `${h.tagName}-${h.textContent.trim()}`;
+}
+const manualOverrides = new Set();
 
 function wireHeadingCollapse(root) {
   for (const h of root.querySelectorAll('h1,h2,h3,h4,h5,h6')) {
     if (h.dataset.collapseWired) continue;
     h.dataset.collapseWired = '1';
     h.addEventListener('click', (e) => {
-      // Only trigger when clicking the left bullet area
       const rect = h.getBoundingClientRect();
       if (e.clientX - rect.left > 28) return;
       toggleHeading(h);
+      if (autoCollapseActive && headingLevel(h) >= 2) {
+        const key = headingKey(h);
+        if (h.dataset.collapsed === 'true') manualOverrides.delete(key);
+        else manualOverrides.add(key);
+      }
     });
   }
   observeHeadings(root);
@@ -291,22 +310,27 @@ function expandAll(root) {
 function applyAutoCollapse(root) {
   for (const h of root.querySelectorAll('h1')) toggleHeading(h, false);
   for (const h of root.querySelectorAll('h2,h3,h4,h5,h6')) toggleHeading(h, true);
+  for (const h of root.querySelectorAll('h2,h3,h4,h5,h6')) {
+    if (manualOverrides.has(headingKey(h))) toggleHeading(h, false);
+  }
 }
 
 document.getElementById('btn-collapse-all').addEventListener('click', () => {
   autoCollapseActive = false;
+  manualOverrides.clear();
   document.getElementById('btn-auto-collapse').classList.remove('active');
   collapseAll(preview);
 });
 document.getElementById('btn-expand-all').addEventListener('click', () => {
   autoCollapseActive = false;
+  manualOverrides.clear();
   document.getElementById('btn-auto-collapse').classList.remove('active');
   expandAll(preview);
 });
 document.getElementById('btn-auto-collapse').addEventListener('click', () => {
   autoCollapseActive = !autoCollapseActive;
   document.getElementById('btn-auto-collapse').classList.toggle('active', autoCollapseActive);
-  if (autoCollapseActive) applyAutoCollapse(preview); else expandAll(preview);
+  if (autoCollapseActive) { manualOverrides.clear(); applyAutoCollapse(preview); }
 });
 
 // ---------- File browser (only when launched without a file arg) ----------
