@@ -1,7 +1,7 @@
 # Changelog
 
 
-## [Unreleased]
+## [0.6.1] — 2026-04-17
 ### Fixed
 - **Inspector frontmatter panel was blank for documents with date
   fields.** PyYAML parses `date: 2026-04-15` into a `datetime.date`,
