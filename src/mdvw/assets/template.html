@@ -41,44 +41,123 @@
     <button id="btn-theme" class="iconbtn" title="Theme" aria-label="Theme">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
     </button>
+    <button id="btn-inspector" class="iconbtn" title="Toggle inspector (Ctrl+Alt+I)" aria-label="Toggle inspector">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M4 4h16v16H4zM14 4v16"/></svg>
+    </button>
   </div>
 </header>
 
 <main id="main">
-  <div id="split" class="split">
-    <textarea id="editor" spellcheck="false" aria-label="Markdown source"></textarea>
-    <div id="gutter" aria-hidden="true"></div>
-    <article id="preview" class="markdown-body">{{MD_HTML}}</article>
+  <aside id="left-pane" class="pane pane-left">
+    <div class="pane-tabs" role="tablist" aria-label="Left pane sections">
+      <button class="pane-tab active" data-section="files" role="tab" aria-selected="true" title="Files">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+      </button>
+      <button class="pane-tab" data-section="outline" role="tab" aria-selected="false" title="Outline">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M4 7h12M4 12h16M4 17h10"/></svg>
+      </button>
+      <button class="pane-tab" data-section="search" role="tab" aria-selected="false" title="Search workspace">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="1.8"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M16 16l5 5"/></svg>
+      </button>
+      <button class="pane-tab" data-section="sessions" role="tab" aria-selected="false" title="Sessions">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M12 7v5l3 3"/></svg>
+      </button>
+      <button class="pane-tab" data-section="diagnostics" role="tab" aria-selected="false" title="Diagnostics">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M12 3l9.5 16.5H2.5z"/></svg>
+      </button>
+    </div>
+    <div class="pane-sections">
+      <section id="section-files" class="pane-section active" role="tabpanel">
+        <header class="section-header"><span>FILES</span></header>
+        <nav id="browser-nav"></nav>
+      </section>
+      <section id="section-search" class="pane-section" hidden role="tabpanel">
+        <header class="section-header"><span>SEARCH</span></header>
+        <div class="search-input-row">
+          <input id="ws-search-input" type="text" placeholder="Search workspace…" autocomplete="off" spellcheck="false">
+          <label class="find-option" title="Match case"><input type="checkbox" id="ws-search-case"><span>Aa</span></label>
+        </div>
+        <div id="ws-search-results" class="ws-search-results"></div>
+      </section>
+      <section id="section-sessions" class="pane-section" hidden role="tabpanel">
+        <header class="section-header"><span>SESSIONS</span></header>
+        <div id="recent-list" class="recent-list"></div>
+      </section>
+      <section id="section-diagnostics" class="pane-section" hidden role="tabpanel">
+        <header class="section-header"><span>DIAGNOSTICS</span></header>
+        <div id="diagnostics-list" class="diagnostics-list"></div>
+      </section>
+      <section id="section-outline" class="pane-section" hidden role="tabpanel">
+        <header class="section-header">
+          <span>OUTLINE</span>
+          <div class="section-actions">
+            <button id="btn-collapse-all" class="section-action" title="Collapse all (Ctrl+Shift+.)">▲</button>
+            <button id="btn-expand-all" class="section-action" title="Expand all (Ctrl+Shift+,)">▼</button>
+            <button id="btn-auto-collapse" class="section-action" title="Auto: collapse below top level">▶</button>
+          </div>
+        </header>
+        <nav id="outline-nav"></nav>
+      </section>
+    </div>
+  </aside>
+  <div class="pane-resize-handle" id="left-resize"></div>
+  <div id="center">
+    <div id="find-bar" class="find-bar" hidden>
+      <input id="find-input" type="text" placeholder="Find…" autocomplete="off" spellcheck="false">
+      <span id="find-count" class="find-count"></span>
+      <button id="find-prev" class="find-btn iconbtn" title="Previous (Shift+Enter)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M18 15l-6-6-6 6"/></svg>
+      </button>
+      <button id="find-next" class="find-btn iconbtn" title="Next (Enter)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <label class="find-option" title="Match case"><input type="checkbox" id="find-case"><span>Aa</span></label>
+      <label class="find-option" title="Whole word"><input type="checkbox" id="find-whole"><span>W</span></label>
+      <button id="find-close" class="find-btn iconbtn" title="Close (Escape)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div id="split" class="split">
+      <textarea id="editor" spellcheck="false" aria-label="Markdown source"></textarea>
+      <div id="gutter" aria-hidden="true"></div>
+      <article id="preview" class="markdown-body">{{MD_HTML}}</article>
+    </div>
   </div>
-
-  <aside id="browser-panel" hidden aria-label="File browser">
-    <header>
-      <span>FILES</span>
-      <button id="btn-browser-close" class="iconbtn" title="Close file browser" aria-label="Close file browser">
+  <div class="pane-resize-handle" id="right-resize"></div>
+  <aside id="right-pane" class="pane pane-right" hidden>
+    <header class="pane-header">
+      <span>INSPECTOR</span>
+      <button id="btn-inspector-close" class="iconbtn" title="Close inspector" aria-label="Close inspector">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M6 6l12 12M18 6 6 18"/></svg>
       </button>
     </header>
-    <nav id="browser-nav"></nav>
+    <div class="inspector-body">
+      <details id="inspector-frontmatter" open>
+        <summary>Frontmatter</summary>
+        <div class="inspector-content" id="insp-fm"></div>
+      </details>
+      <details id="inspector-stats" open>
+        <summary>Document Stats</summary>
+        <div class="inspector-content" id="insp-stats"></div>
+      </details>
+      <details id="inspector-export">
+        <summary>Export</summary>
+        <div class="inspector-content" id="insp-export">
+          <button id="btn-export-print" class="export-btn">Print…</button>
+          <button id="btn-export-html" class="export-btn">Export HTML…</button>
+        </div>
+      </details>
+    </div>
   </aside>
-
-  <aside id="outline-panel" hidden aria-label="Document outline">
-    <header>
-      <span>OUTLINE</span>
-      <button id="btn-outline-close" class="iconbtn" title="Close outline" aria-label="Close outline">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M6 6l12 12M18 6 6 18"/></svg>
-      </button>
-    </header>
-    <nav id="outline-nav"></nav>
-  </aside>
-
-  <div id="rail" aria-hidden="false">
-    <button id="btn-outline" class="railbtn" title="Outline" aria-label="Outline">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M4 7h12M4 12h16M4 17h10"/></svg>
-    </button>
-    <button id="btn-collapse-all" class="railbtn rail-text" title="Collapse all (Ctrl+Shift+.)">▲ All</button>
-    <button id="btn-expand-all" class="railbtn rail-text" title="Expand all (Ctrl+Shift+,)">▼ All</button>
-    <button id="btn-auto-collapse" class="railbtn rail-text" title="Auto: collapse below top level">▶ Auto</button>
-  </div>
+  <footer id="status-bar">
+    <span id="sb-mode" class="sb-item sb-clickable" title="Current mode">Read</span>
+    <span id="sb-save" class="sb-item">Saved</span>
+    <span class="sb-spacer"></span>
+    <span id="sb-words" class="sb-item">0 words</span>
+    <span id="sb-cursor" class="sb-item" hidden>Ln 1, Col 1</span>
+    <span id="sb-diagnostics" class="sb-item sb-clickable" title="Diagnostics" hidden>0</span>
+    <span id="sb-encoding" class="sb-item">UTF-8</span>
+  </footer>
 </main>
 
 <dialog id="assoc-prompt">
@@ -130,17 +209,28 @@
   <form method="dialog">
     <h3>Keyboard shortcuts</h3>
     <table class="shortcuts">
+      <tr><td><kbd>Ctrl</kbd>+<kbd>P</kbd></td><td>Command palette</td></tr>
       <tr><td><kbd>Ctrl</kbd>+<kbd>1</kbd></td><td>Read mode</td></tr>
       <tr><td><kbd>Ctrl</kbd>+<kbd>2</kbd></td><td>Edit (split) mode</td></tr>
       <tr><td><kbd>Ctrl</kbd>+<kbd>3</kbd></td><td>Source mode</td></tr>
       <tr><td><kbd>E</kbd></td><td>Cycle Read → Edit → Source</td></tr>
       <tr><td><kbd>Ctrl</kbd>+<kbd>O</kbd></td><td>Open file</td></tr>
       <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>Save</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Find in document</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd></td><td>Go to heading</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd></td><td>Search workspace</td></tr>
       <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd></td><td>Toggle narrow/wide preview</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>I</kbd></td><td>Toggle inspector</td></tr>
     </table>
     <menu><button value="ok" autofocus>Close</button></menu>
   </form>
 </dialog>
+
+<div id="palette-backdrop" class="palette-backdrop" hidden></div>
+<div id="command-palette" class="palette" hidden>
+  <input id="palette-input" type="text" placeholder="Type a command…" autocomplete="off" spellcheck="false">
+  <div id="palette-results" class="palette-results"></div>
+</div>
 
 <div id="toast"></div>
 
@@ -150,6 +240,7 @@
 <script type="text/plain" id="md-path">{{MD_PATH}}</script>
 <script type="text/plain" id="md-start-mode">{{MD_START_MODE}}</script>
 <script type="text/plain" id="md-browse-root">{{MD_BROWSE_ROOT}}</script>
+<script type="application/json" id="md-ui-state">{{MD_UI_STATE}}</script>
 
 <script src="vendor/katex/katex.min.js"></script>
 <script src="vendor/katex/auto-render.min.js"></script>

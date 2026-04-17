@@ -85,22 +85,16 @@ def start_tray(window: webview.Window, api: JsApi | None = None) -> threading.Th
 
     def on_quit(icon, item):
         if api is not None and getattr(api, "_dirty", False):
-            # Make sure the confirmation has a visible parent — prompting
-            # over an empty desktop with no window context is disorienting.
+            # Route through JS to avoid thread-affinity issues with
+            # native dialogs called from the pystray thread.
             with contextlib.suppress(Exception):
                 window.show()
                 window.restore()
-            try:
-                confirm = window.create_confirmation_dialog(
-                    "Unsaved changes",
-                    "You have unsaved edits. Quit anyway?",
+            with contextlib.suppress(Exception):
+                window.evaluate_js(
+                    "window.mdvwConfirmTrayQuit && window.mdvwConfirmTrayQuit()"
                 )
-            except Exception:
-                # If the dialog fails, refuse to quit — losing edits is
-                # worse than a stuck-feeling tray.
-                return
-            if not confirm:
-                return
+            return
         if api is not None:
             api._quitting = True
         icon.visible = False

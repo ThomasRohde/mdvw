@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import contextlib
 import json
 import logging
@@ -8,8 +10,10 @@ import re
 import sys
 import tempfile
 import threading
+from datetime import UTC, datetime
 from importlib.resources import files
 from pathlib import Path
+from typing import ClassVar
 
 import webview
 
@@ -26,9 +30,12 @@ class _EmptySpamFilter(logging.Filter):
         return "Empty.Empty" not in record.getMessage()
 logging.getLogger().addFilter(_EmptySpamFilter())
 
-from . import __version__, config  # noqa: E402  (must run after logger filter)
+from . import __version__, config, state  # noqa: E402  (must run after logger filter)
+from .diagnostics import check_document as _check_document  # noqa: E402
+from .export import build_standalone_html as _build_standalone_html  # noqa: E402
 from .frontmatter import parse_frontmatter, split_frontmatter  # noqa: E402
 from .render import render_frontmatter_card, render_markdown  # noqa: E402
+from .search import search_workspace as _search_workspace  # noqa: E402
 
 
 def _render_with_frontmatter(source: str, doc_base: str | None = None) -> str:
@@ -58,9 +65,10 @@ def _initial_file(file: Path | None) -> tuple[Path | None, str]:
     return None, example.read_text(encoding="utf-8")
 
 
-def _json_for_script_tag(value: str) -> str:
+def _json_for_script_tag(value: object) -> str:
     """JSON-encode a value safely for embedding inside an HTML <script> element.
 
+    Accepts any JSON-serializable value (string, dict, list, etc.).
     Standard json.dumps does not escape `</script>`, so a document that
     contains that sequence would break out of the script tag and execute
     arbitrary HTML/JS before the sanitizer runs. We additionally neutralize
@@ -132,6 +140,7 @@ def _build_html(
         .replace("{{MD_START_MODE}}", "edit" if edit else "read")
         .replace("{{MD_BROWSE_ROOT}}", str(browse_root) if browse_root else "")
         .replace("{{MD_VERSION}}", __version__)
+        .replace("{{MD_UI_STATE}}", _json_for_script_tag(state.load()))
     )
 
 
@@ -152,6 +161,33 @@ def _atomic_write_text(path: Path, content: str) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
             f.write(content)
+            f.flush()
+            with contextlib.suppress(OSError):
+                os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        raise
+
+
+def _atomic_write_bytes(path: Path, data: bytes) -> None:
+    """Byte-oriented counterpart to ``_atomic_write_text``.
+
+    A crash mid-write (disk full, AV lock, process kill) leaves the tmp file
+    behind instead of a half-written target — critical for binary assets
+    (pasted images) where a truncated PNG is silently corrupt.
+    """
+    path = Path(path)
+    directory = path.parent if path.parent != Path("") else Path.cwd()
+    directory.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=str(directory)
+    )
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
             f.flush()
             with contextlib.suppress(OSError):
                 os.fsync(f.fileno())
@@ -215,6 +251,15 @@ class JsApi:
     def set_dirty(self, value: bool) -> None:
         self._dirty = bool(value)
 
+    def confirm_quit(self) -> None:
+        """Called from JS when the user confirms quit from the tray dialog."""
+        from .tray import stop_tray
+
+        self._quitting = True
+        stop_tray()
+        if self._window is not None:
+            self._window.destroy()
+
     def ack_reload(self) -> bool:
         """JS calls this when it actually applied a watched reload.
 
@@ -230,7 +275,10 @@ class JsApi:
         return True
 
     def render_markdown(self, text: str) -> str:
-        return _render_with_frontmatter(text)
+        doc_base = None
+        if self._current_path:
+            doc_base = self._current_path.parent.resolve().as_uri() + "/"
+        return _render_with_frontmatter(text, doc_base=doc_base)
 
     def save_file(self, content: str, force: bool = False) -> dict:
         """Save the current document atomically.
@@ -383,6 +431,39 @@ class JsApi:
         self._load(Path(result[0]))
         return True
 
+    def open_recent(self, path_str: str) -> bool:
+        """Load a markdown file from the persisted recent-files list.
+
+        Unlike ``open_path`` (sidebar browser) this does NOT require the
+        target to sit under ``self._browse_root`` — the recent list spans
+        previous workspaces. But pywebview exposes every API method to the
+        renderer, so if a sanitizer bypass in a viewed document landed a
+        call here it could otherwise read any ``.md`` on disk. We gate on
+        an allowlist: the caller-supplied path must match an entry in the
+        persisted recent-files list (case-insensitive on Windows).
+        """
+        if not isinstance(path_str, str) or not path_str:
+            return False
+        try:
+            candidate = Path(path_str).resolve()
+        except OSError:
+            return False
+        if candidate.suffix.lower() not in (".md", ".markdown"):
+            return False
+        if not candidate.is_file():
+            return False
+        candidate_key = os.path.normcase(str(candidate))
+        allowed: set[str] = set()
+        for p in state.get("recent_files", []) or []:
+            try:
+                allowed.add(os.path.normcase(str(Path(p).resolve())))
+            except OSError:
+                continue
+        if candidate_key not in allowed:
+            return False
+        self._load(candidate)
+        return True
+
     def register_association(self) -> bool:
         from .assoc import register
 
@@ -392,6 +473,239 @@ class JsApi:
 
     def decline_association(self) -> None:
         config.set_key("association_prompted", True)
+
+    # -- UI state persistence --------------------------------------------------
+
+    # Keys the renderer is allowed to persist via ``save_ui_state``.
+    # Python-owned trust-boundary keys (``recent_files``, ``last_file``,
+    # ``last_browse_root``) are deliberately excluded — ``open_recent``
+    # uses ``recent_files`` as an allowlist, so a renderer that could
+    # write it would defeat the workspace boundary.
+    _UI_STATE_SCHEMA: ClassVar[dict[str, type | tuple[type, ...]]] = {
+        "left_pane_width": int,
+        "left_pane_collapsed": bool,
+        "left_pane_section": str,
+        "right_pane_width": int,
+        "right_pane_collapsed": bool,
+        "mode": str,
+        "preview_narrow": bool,
+    }
+
+    def save_ui_state(self, data: dict) -> None:
+        """Persist UI state (pane widths, sections, etc.) from JS.
+
+        Only the keys in ``_UI_STATE_SCHEMA`` are merged — any other field
+        (especially ``recent_files``, ``last_file``) is dropped. pywebview
+        exposes this method to the renderer, so without a whitelist a
+        sanitizer bypass could poison the recent-file allowlist and
+        smuggle arbitrary ``.md`` reads through ``open_recent``.
+        """
+        if not isinstance(data, dict):
+            return
+        cleaned: dict = {}
+        for key, expected in self._UI_STATE_SCHEMA.items():
+            if key not in data:
+                continue
+            value = data[key]
+            # bool is a subclass of int — reject it when int is expected
+            # so a caller can't pass True where an int width belongs.
+            if expected is int and isinstance(value, bool):
+                continue
+            if not isinstance(value, expected):
+                continue
+            cleaned[key] = value
+        if not cleaned:
+            return
+        current = state.load()
+        current.update(cleaned)
+        state.save(current)
+
+    def get_ui_state(self) -> dict:
+        """Return the persisted UI state for JS initialisation."""
+        return state.load()
+
+    def get_recent_files(self) -> list[dict]:
+        """Return the recent files list with existence flags."""
+        recent = state.get("recent_files", [])
+        result = []
+        for p in recent:
+            pp = Path(p)
+            result.append({"path": p, "name": pp.name, "exists": pp.is_file()})
+        return result
+
+    def clear_recent_files(self) -> None:
+        state.set_key("recent_files", [])
+
+    def search_filenames(self, query: str, max_results: int = 50) -> list[dict]:
+        """Search for markdown files by name within the browse root."""
+        if not self._browse_root or not query or not isinstance(query, str):
+            return []
+        q = query.lower()
+        results = []
+        try:
+            root = self._browse_root.resolve()
+        except OSError:
+            return []
+        count = 0
+        for dirpath, dirnames, filenames in os.walk(root):
+            # Prune skipped directories in-place.
+            dirnames[:] = [
+                d for d in dirnames
+                if d not in self._BROWSE_SKIP_DIRS and not d.startswith(".")
+            ]
+            for name in filenames:
+                if not name.lower().endswith((".md", ".markdown")):
+                    continue
+                if q not in name.lower():
+                    continue
+                full = Path(dirpath) / name
+                try:
+                    rel = full.relative_to(root)
+                except ValueError:
+                    continue
+                results.append({
+                    "name": name,
+                    "path": str(full),
+                    "relative": str(rel),
+                })
+                if len(results) >= max_results:
+                    return results
+            count += 1
+            if count > 10000:
+                break
+        return results
+
+    _IMAGE_EXT_WHITELIST: ClassVar[frozenset[str]] = frozenset(
+        {"png", "jpg", "jpeg", "gif", "webp"}
+    )
+    # Max decoded size for a pasted image. 25 MB is well above legitimate
+    # screenshot sizes but caps memory/disk cost when a renderer (or a
+    # sanitizer bypass calling the bridge directly) sends a huge payload.
+    _IMAGE_MAX_DECODED_BYTES: ClassVar[int] = 25 * 1024 * 1024
+
+    def save_image(self, data_url: str, suggested_name: str) -> dict:
+        """Save a base64 data-URL image to the document's images/ folder.
+
+        Only raster image types in ``_IMAGE_EXT_WHITELIST`` are accepted —
+        SVG is excluded on purpose because a saved .svg can execute script
+        if a user later opens it directly in a browser. A fixed size cap
+        and strict base64 decoding guard against renderer payloads that
+        would otherwise stall the app or fill the document volume.
+
+        Returns ``{status, relative_path}`` on success, or an error dict.
+        """
+        if self._current_path is None:
+            return {"status": "error", "message": "Save the document first"}
+        if not isinstance(data_url, str):
+            return {"status": "error", "message": "Invalid image data"}
+
+        doc_dir = self._current_path.parent
+        images_dir = doc_dir / "images"
+        images_dir.mkdir(exist_ok=True)
+
+        # Parse data URL: data:image/png;base64,iVBOR...
+        m = re.match(r"data:image/([\w+.-]+);base64,(.+)", data_url, re.DOTALL)
+        if not m:
+            return {"status": "error", "message": "Invalid image data"}
+        ext = m.group(1).lower()
+        if ext == "jpeg":
+            ext = "jpg"
+        if ext not in self._IMAGE_EXT_WHITELIST:
+            return {"status": "error", "message": f"Unsupported image type: {ext}"}
+        raw = m.group(2)
+
+        # Cheap pre-decode size bound. Base64 is ~4/3 the decoded size, so
+        # reject before allocating the decoded bytes at all. +16 absorbs
+        # whitespace/padding variance.
+        max_encoded = (self._IMAGE_MAX_DECODED_BYTES * 4 + 2) // 3 + 16
+        if len(raw) > max_encoded:
+            return {"status": "error", "message": "Image too large"}
+
+        try:
+            data = base64.b64decode(raw, validate=True)
+        except (binascii.Error, ValueError):
+            return {"status": "error", "message": "Invalid image data"}
+        if len(data) > self._IMAGE_MAX_DECODED_BYTES:
+            return {"status": "error", "message": "Image too large"}
+
+        ts = datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S")
+        name = suggested_name or f"image-{ts}.{ext}"
+        # Sanitize filename
+        name = re.sub(r"[^\w.\-]", "_", name)
+        if not name.lower().endswith(f".{ext}"):
+            name = f"{name}.{ext}"
+
+        target = images_dir / name
+        # Collision-safe
+        if target.exists():
+            stem = target.stem
+            i = 2
+            while target.exists():
+                target = images_dir / f"{stem}-{i}{target.suffix}"
+                i += 1
+
+        # Security: ensure target is under doc_dir
+        try:
+            target.resolve().relative_to(doc_dir.resolve())
+        except ValueError:
+            return {"status": "error", "message": "Path traversal rejected"}
+
+        try:
+            _atomic_write_bytes(target, data)
+        except OSError as e:
+            return {"status": "error", "message": str(e)}
+
+        relative = target.relative_to(doc_dir).as_posix()
+        return {"status": "ok", "relative_path": relative}
+
+    def run_diagnostics(self, content: str) -> list[dict]:
+        """Check the document for common issues."""
+        doc_dir = str(self._current_path.parent) if self._current_path else None
+        return _check_document(content, doc_dir=doc_dir)
+
+    def export_html(self, content: str) -> dict:
+        """Export the current document as self-contained HTML."""
+        if self._window is None:
+            return {"status": "error", "message": "No window"}
+        name = self._current_path.stem if self._current_path else "untitled"
+        result = self._window.create_file_dialog(
+            webview.SAVE_DIALOG,
+            save_filename=f"{name}.html",
+            file_types=("HTML (*.html)", "All files (*.*)"),
+        )
+        if not result:
+            return {"status": "cancelled"}
+        out_path = Path(result)
+        title = self._current_path.name if self._current_path else "mdvw export"
+        doc_dir = self._current_path.parent if self._current_path else None
+        html = _build_standalone_html(content, doc_dir=doc_dir, title=title)
+        # Atomic write so a crash / disk-full / AV mid-write can't truncate
+        # a pre-existing HTML at the target path.
+        try:
+            _atomic_write_text(out_path, html)
+        except OSError as e:
+            return {"status": "error", "message": str(e)}
+        return {"status": "ok", "path": str(out_path)}
+
+    def print_document(self) -> None:
+        """Trigger the browser print dialog."""
+        if self._window is not None:
+            self._window.evaluate_js("window.print()")
+
+    def search_workspace(self, query: str, case_sensitive: bool = False) -> list[dict]:
+        """Search Markdown files in the browse root for a text query."""
+        if not self._browse_root:
+            return []
+        return _search_workspace(
+            self._browse_root, query, case_sensitive=case_sensitive,
+        )
+
+    def parse_frontmatter_fields(self, text: str) -> dict | None:
+        """Return parsed frontmatter as a dict, or None if absent/invalid."""
+        meta, _body, err = parse_frontmatter(text)
+        if err or meta is None:
+            return None
+        return meta
 
     def _pick_save_path(self) -> Path | None:
         if self._window is None:
@@ -408,6 +722,9 @@ class JsApi:
         html = _render_with_frontmatter(source)
         self._current_path = path
         new_fp = _fingerprint(path)
+        if reason != "watch":
+            state.add_recent(str(path))
+            state.set_key("last_file", str(path))
         if reason == "watch":
             # Hold the new fingerprint in escrow — only promote if JS
             # confirms it applied the reload (via ack_reload).
@@ -557,12 +874,29 @@ def run(file: Path | None, edit: bool, tray: bool) -> int:
             return 0
 
     _set_app_user_model_id()
-    path, source = _initial_file(file)
     browse_root: Path | None = None
     try:
         browse_root = Path.cwd().resolve()
     except OSError:
         browse_root = None
+    # Reopen last file if none was provided on the command line — but only
+    # when it belongs to the workspace we were just launched in. Otherwise
+    # a `mdvw` in a different project silently reopens an unrelated
+    # document while the sidebar/search operate on the new cwd.
+    if file is None and browse_root is not None:
+        last = state.get("last_file")
+        if last:
+            try:
+                last_path = Path(last).resolve()
+            except OSError:
+                last_path = None
+            if (
+                last_path is not None
+                and last_path.is_file()
+                and last_path.is_relative_to(browse_root)
+            ):
+                file = last_path
+    path, source = _initial_file(file)
 
     # Resolve the packaged assets dir and rewrite app-asset refs in the
     # template to absolute URLs rooted there. This avoids a document-wide
@@ -588,6 +922,8 @@ def run(file: Path | None, edit: bool, tray: bool) -> int:
     api._browse_root = browse_root
     if path is not None:
         api._loaded_fingerprint = _fingerprint(path)
+        state.add_recent(str(path))
+        state.set_key("last_file", str(path))
 
     window_title = f"{path.name if path else 'mdvw'} — mdvw"
     window = webview.create_window(
@@ -663,6 +999,9 @@ def run(file: Path | None, edit: bool, tray: bool) -> int:
                 "refusing close to protect unsaved edits."
             )
             return False
+        if confirm:
+            # Prevent re-entrant closing events from spawning more dialogs.
+            api._quitting = True
         return bool(confirm)
 
     window.events.closing += _on_closing

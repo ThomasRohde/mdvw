@@ -8,6 +8,7 @@ const fileChip = document.getElementById('file-chip');
 const assocDialog = document.getElementById('assoc-prompt');
 const helpDialog = document.getElementById('help-dialog');
 const segs = document.querySelectorAll('.segmented .seg');
+const mainEl = document.getElementById('main');
 
 // Defense in depth: scope bootstrap lookups to the specific <script> tags
 // we injected, so a user document with `<div id="md-source">...` can't
@@ -20,6 +21,7 @@ const mdSource = JSON.parse(bootstrapEl('md-source').textContent || '""');
 const mdPath = bootstrapEl('md-path').textContent.trim();
 const startMode = (bootstrapEl('md-start-mode').textContent.trim() || 'read');
 const browseRoot = (bootstrapEl('md-browse-root')?.textContent || '').trim();
+const uiState = JSON.parse(bootstrapEl('md-ui-state')?.textContent || '{}');
 
 const getApi = () => (window.pywebview && window.pywebview.api) || null;
 
@@ -54,13 +56,25 @@ async function setMode(mode) {
   } else {
     await rerender();
   }
+  updateStatusBar();
 }
 
 segs.forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
 
 // Cycle on E, but only when not typing in textarea/input
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && paletteOpen) { closePalette(); e.preventDefault(); return; }
   const typing = document.activeElement && (document.activeElement.tagName === 'TEXTAREA' || document.activeElement.tagName === 'INPUT');
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
+    e.preventDefault();
+    if (paletteOpen) closePalette(); else openPalette();
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'f' || e.key === 'F') && !e.altKey) {
+    e.preventDefault();
+    openFind();
+    return;
+  }
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 's') { e.preventDefault(); save(); return; }
   if ((e.ctrlKey || e.metaKey) && e.key === 'o') {
     e.preventDefault();
@@ -70,6 +84,22 @@ document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'w' || e.key === 'W')) {
     e.preventDefault();
     preview.classList.toggle('narrow');
+    persistState();
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'f' || e.key === 'F') && !e.altKey) {
+    e.preventDefault();
+    openWorkspaceSearch();
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'o' || e.key === 'O') && !e.altKey) {
+    e.preventDefault();
+    openPalette('heading');
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.altKey && (e.key === 'i' || e.key === 'I')) {
+    e.preventDefault();
+    toggleRightPane();
     return;
   }
   if ((e.ctrlKey || e.metaKey) && ['1','2','3'].includes(e.key)) {
@@ -189,18 +219,720 @@ async function enhance(root) {
   if (autoCollapseActive) applyAutoCollapse(root);
 }
 
+// ---------- Pane management ----------
+
+const leftPane = document.getElementById('left-pane');
+const rightPane = document.getElementById('right-pane');
+const paneTabs = leftPane.querySelectorAll('.pane-tab');
+const paneSections = leftPane.querySelectorAll('.pane-section');
+let sessionsLoaded = false;
+let leftPaneCollapsed = uiState.left_pane_collapsed ?? false;
+let leftPaneWidth = uiState.left_pane_width ?? 280;
+let leftPaneSection = uiState.left_pane_section ?? 'files';
+let rightPaneCollapsed = uiState.right_pane_collapsed ?? true;
+let rightPaneWidth = uiState.right_pane_width ?? 300;
+
+function applyLeftPane() {
+  if (leftPaneCollapsed) {
+    mainEl.style.setProperty('--left-w', '0px');
+    leftPane.hidden = true;
+  } else {
+    mainEl.style.setProperty('--left-w', leftPaneWidth + 'px');
+    leftPane.hidden = false;
+  }
+}
+
+function applyRightPane() {
+  if (rightPaneCollapsed) {
+    mainEl.style.setProperty('--right-w', '0px');
+    rightPane.hidden = true;
+  } else {
+    mainEl.style.setProperty('--right-w', rightPaneWidth + 'px');
+    rightPane.hidden = false;
+  }
+}
+
+function showLeftSection(name) {
+  leftPaneSection = name;
+  paneTabs.forEach(t => {
+    const on = t.dataset.section === name;
+    t.classList.toggle('active', on);
+    t.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+  paneSections.forEach(s => {
+    const on = s.id === `section-${name}`;
+    s.classList.toggle('active', on);
+    s.hidden = !on;
+  });
+  leftPaneCollapsed = false;
+  applyLeftPane();
+  persistState();
+  // Lazy-load section data
+  if (name === 'sessions' && !sessionsLoaded) loadSessions();
+  if (name === 'files' && !browserLoaded && browseRoot) loadBrowser();
+}
+
+function toggleLeftPane() {
+  leftPaneCollapsed = !leftPaneCollapsed;
+  applyLeftPane();
+  btnFiles.classList.toggle('active', !leftPaneCollapsed);
+  persistState();
+}
+
+function toggleRightPane() {
+  rightPaneCollapsed = !rightPaneCollapsed;
+  applyRightPane();
+  document.getElementById('btn-inspector').classList.toggle('active', !rightPaneCollapsed);
+  persistState();
+}
+
+paneTabs.forEach(t => t.addEventListener('click', () => {
+  if (t.dataset.section === leftPaneSection && !leftPaneCollapsed) {
+    toggleLeftPane();
+  } else {
+    showLeftSection(t.dataset.section);
+  }
+}));
+
+// Resize drag handlers
+function setupResize(handleId, getWidth, setWidth, minW, maxW) {
+  const handle = document.getElementById(handleId);
+  if (!handle) return;
+  handle.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = getWidth();
+    handle.classList.add('dragging');
+    const onMove = (e2) => {
+      const isLeft = handleId === 'left-resize';
+      const delta = isLeft ? e2.clientX - startX : startX - e2.clientX;
+      setWidth(Math.max(minW, Math.min(maxW, startW + delta)));
+    };
+    const onUp = () => {
+      handle.classList.remove('dragging');
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      persistState();
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+}
+
+setupResize('left-resize',
+  () => leftPaneWidth,
+  (w) => { leftPaneWidth = w; applyLeftPane(); },
+  160, 500);
+
+setupResize('right-resize',
+  () => rightPaneWidth,
+  (w) => { rightPaneWidth = w; applyRightPane(); },
+  200, 500);
+
+// State persistence
+let persistTimer = 0;
+function persistState() {
+  clearTimeout(persistTimer);
+  persistTimer = setTimeout(async () => {
+    const api = getApi();
+    if (api && api.save_ui_state) {
+      await api.save_ui_state({
+        left_pane_width: leftPaneWidth,
+        left_pane_collapsed: leftPaneCollapsed,
+        left_pane_section: leftPaneSection,
+        right_pane_width: rightPaneWidth,
+        right_pane_collapsed: rightPaneCollapsed,
+        mode: currentMode,
+        preview_narrow: preview.classList.contains('narrow'),
+      });
+    }
+  }, 300);
+}
+
+// ---------- Command palette ----------
+
+const paletteEl = document.getElementById('command-palette');
+const paletteInput = document.getElementById('palette-input');
+const paletteResults = document.getElementById('palette-results');
+const paletteBackdrop = document.getElementById('palette-backdrop');
+let paletteOpen = false;
+let paletteActiveIdx = 0;
+let paletteFiltered = [];
+
+const commands = [];
+function registerCommand(id, label, keys, action) {
+  commands.push({ id, label, keys: keys || '', action });
+}
+
+let paletteMode = 'command'; // 'command' | 'heading'
+
+function openPalette(mode) {
+  paletteMode = mode || 'command';
+  paletteOpen = true;
+  paletteEl.hidden = false;
+  paletteBackdrop.hidden = false;
+  paletteInput.value = paletteMode === 'heading' ? '@' : '';
+  paletteInput.placeholder = paletteMode === 'heading' ? 'Go to heading…' : 'Type a command…';
+  paletteActiveIdx = 0;
+  renderPaletteResults(paletteInput.value);
+  paletteInput.focus();
+}
+
+function closePalette() {
+  paletteOpen = false;
+  paletteEl.hidden = true;
+  paletteBackdrop.hidden = true;
+}
+
+function getHeadingItems() {
+  const headings = preview.querySelectorAll('h1,h2,h3,h4,h5,h6');
+  return Array.from(headings).map(h => ({
+    label: h.textContent.trim(),
+    level: parseInt(h.tagName[1], 10),
+    el: h,
+  }));
+}
+
+function renderPaletteResults(query) {
+  const raw = query;
+  const isHeadingMode = raw.startsWith('@');
+
+  if (isHeadingMode) {
+    const q = raw.slice(1).toLowerCase().trim();
+    const items = getHeadingItems();
+    paletteFiltered = q
+      ? items.filter(h => h.label.toLowerCase().includes(q))
+      : items;
+    paletteResults.innerHTML = '';
+    if (!paletteFiltered.length) {
+      paletteResults.innerHTML = '<div class="palette-empty">No headings found</div>';
+      return;
+    }
+    paletteFiltered.forEach((item, i) => {
+      const div = document.createElement('div');
+      div.className = 'palette-item' + (i === paletteActiveIdx ? ' active' : '');
+      const labelSpan = document.createElement('span');
+      labelSpan.className = 'palette-label';
+      const lvlBadge = `<span class="palette-keys" style="margin-right:8px">H${item.level}</span>`;
+      if (q) {
+        const idx = item.label.toLowerCase().indexOf(q);
+        const before = item.label.slice(0, idx);
+        const match = item.label.slice(idx, idx + q.length);
+        const after = item.label.slice(idx + q.length);
+        labelSpan.innerHTML = `${lvlBadge}${escapeHtml(before)}<b>${escapeHtml(match)}</b>${escapeHtml(after)}`;
+      } else {
+        labelSpan.innerHTML = `${lvlBadge}${escapeHtml(item.label)}`;
+      }
+      // Indent based on level
+      labelSpan.style.paddingLeft = ((item.level - 1) * 12) + 'px';
+      div.appendChild(labelSpan);
+      div.addEventListener('click', () => {
+        closePalette();
+        item.el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+      div.addEventListener('mouseenter', () => {
+        paletteActiveIdx = i;
+        paletteResults.querySelectorAll('.palette-item').forEach((el, j) =>
+          el.classList.toggle('active', j === i));
+      });
+      paletteResults.appendChild(div);
+    });
+    return;
+  }
+
+  // File search mode (no prefix, when browse root exists)
+  if (raw.trim() && !raw.startsWith('>') && browseRoot && paletteMode === 'command') {
+    // Search both commands and filenames
+    const q = raw.toLowerCase().trim();
+    const cmdMatches = commands.filter(c => c.label.toLowerCase().includes(q));
+    // Trigger async file search
+    searchFilenames(q);
+    paletteFiltered = cmdMatches;
+    // Render commands first, file results will append asynchronously
+    renderPaletteCommandItems(q, cmdMatches);
+    return;
+  }
+
+  // Command mode
+  const q = raw.toLowerCase().trim();
+  paletteFiltered = q
+    ? commands.filter(c => c.label.toLowerCase().includes(q))
+    : [...commands];
+  paletteResults.innerHTML = '';
+  if (!paletteFiltered.length) {
+    paletteResults.innerHTML = '<div class="palette-empty">No matching commands</div>';
+    return;
+  }
+  paletteFiltered.forEach((cmd, i) => {
+    const div = document.createElement('div');
+    div.className = 'palette-item' + (i === paletteActiveIdx ? ' active' : '');
+    const labelSpan = document.createElement('span');
+    labelSpan.className = 'palette-label';
+    if (q) {
+      const idx = cmd.label.toLowerCase().indexOf(q);
+      const before = cmd.label.slice(0, idx);
+      const match = cmd.label.slice(idx, idx + q.length);
+      const after = cmd.label.slice(idx + q.length);
+      labelSpan.innerHTML = `${escapeHtml(before)}<b>${escapeHtml(match)}</b>${escapeHtml(after)}`;
+    } else {
+      labelSpan.textContent = cmd.label;
+    }
+    div.appendChild(labelSpan);
+    if (cmd.keys) {
+      const keysSpan = document.createElement('span');
+      keysSpan.className = 'palette-keys';
+      keysSpan.textContent = cmd.keys;
+      div.appendChild(keysSpan);
+    }
+    div.addEventListener('click', () => { closePalette(); cmd.action(); });
+    div.addEventListener('mouseenter', () => {
+      paletteActiveIdx = i;
+      paletteResults.querySelectorAll('.palette-item').forEach((el, j) =>
+        el.classList.toggle('active', j === i));
+    });
+    paletteResults.appendChild(div);
+  });
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+paletteInput.addEventListener('input', () => {
+  paletteActiveIdx = 0;
+  renderPaletteResults(paletteInput.value);
+});
+
+paletteInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { closePalette(); e.preventDefault(); return; }
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    paletteActiveIdx = Math.min(paletteActiveIdx + 1, paletteFiltered.length - 1);
+    updatePaletteActive();
+    return;
+  }
+  if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    paletteActiveIdx = Math.max(paletteActiveIdx - 1, 0);
+    updatePaletteActive();
+    return;
+  }
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    const item = paletteFiltered[paletteActiveIdx];
+    if (item) {
+      closePalette();
+      if (item.action) item.action(); // command mode
+      else if (item.el) item.el.scrollIntoView({ behavior: 'smooth', block: 'start' }); // heading mode
+    }
+    return;
+  }
+});
+
+function updatePaletteActive() {
+  paletteResults.querySelectorAll('.palette-item').forEach((el, i) => {
+    const on = i === paletteActiveIdx;
+    el.classList.toggle('active', on);
+    if (on) el.scrollIntoView({ block: 'nearest' });
+  });
+}
+
+paletteBackdrop.addEventListener('click', closePalette);
+
+let fileSearchTimer = 0;
+function searchFilenames(query) {
+  clearTimeout(fileSearchTimer);
+  fileSearchTimer = setTimeout(async () => {
+    if (!paletteOpen) return;
+    const api = getApi();
+    if (!api || !api.search_filenames) return;
+    const results = await api.search_filenames(query);
+    if (!paletteOpen || paletteInput.value.startsWith('@')) return;
+    // Append file results to palette
+    if (results && results.length) {
+      const sep = document.createElement('div');
+      sep.className = 'palette-empty';
+      sep.style.padding = '4px 16px';
+      sep.style.fontSize = '10px';
+      sep.style.letterSpacing = '0.1em';
+      sep.textContent = 'FILES';
+      paletteResults.appendChild(sep);
+      for (const f of results) {
+        const existing = paletteFiltered.length;
+        paletteFiltered.push({ action: () => openPathFromPalette(f.path), label: f.name, path: f.relative });
+        const div = document.createElement('div');
+        div.className = 'palette-item';
+        const labelSpan = document.createElement('span');
+        labelSpan.className = 'palette-label';
+        labelSpan.textContent = f.name;
+        const pathSpan = document.createElement('span');
+        pathSpan.className = 'palette-keys';
+        pathSpan.textContent = f.relative;
+        div.appendChild(labelSpan);
+        div.appendChild(pathSpan);
+        const idx = existing + paletteResults.querySelectorAll('.palette-empty').length - 1;
+        div.addEventListener('click', () => { closePalette(); openPathFromPalette(f.path); });
+        paletteResults.appendChild(div);
+      }
+    }
+  }, 150);
+}
+
+async function openPathFromPalette(path) {
+  if (!(await confirmDiscardIfDirty())) return;
+  const api = getApi();
+  if (api && api.open_path) {
+    const ok = await api.open_path(path);
+    if (!ok) flash('Could not open file');
+  }
+}
+
+function renderPaletteCommandItems(q, cmdMatches) {
+  paletteResults.innerHTML = '';
+  if (!cmdMatches.length) {
+    // File results will populate asynchronously
+    return;
+  }
+  cmdMatches.forEach((cmd, i) => {
+    const div = document.createElement('div');
+    div.className = 'palette-item' + (i === paletteActiveIdx ? ' active' : '');
+    const labelSpan = document.createElement('span');
+    labelSpan.className = 'palette-label';
+    if (q) {
+      const idx = cmd.label.toLowerCase().indexOf(q);
+      const before = cmd.label.slice(0, idx);
+      const match = cmd.label.slice(idx, idx + q.length);
+      const after = cmd.label.slice(idx + q.length);
+      labelSpan.innerHTML = `${escapeHtml(before)}<b>${escapeHtml(match)}</b>${escapeHtml(after)}`;
+    } else {
+      labelSpan.textContent = cmd.label;
+    }
+    div.appendChild(labelSpan);
+    if (cmd.keys) {
+      const keysSpan = document.createElement('span');
+      keysSpan.className = 'palette-keys';
+      keysSpan.textContent = cmd.keys;
+      div.appendChild(keysSpan);
+    }
+    div.addEventListener('click', () => { closePalette(); cmd.action(); });
+    paletteResults.appendChild(div);
+  });
+}
+
+// Register built-in commands
+registerCommand('mode.read', 'Read Mode', 'Ctrl+1', () => setMode('read'));
+registerCommand('mode.edit', 'Edit Mode', 'Ctrl+2', () => setMode('edit'));
+registerCommand('mode.source', 'Source Mode', 'Ctrl+3', () => setMode('source'));
+registerCommand('file.open', 'Open File', 'Ctrl+O', () => openFile());
+registerCommand('file.save', 'Save', 'Ctrl+S', () => save());
+registerCommand('pane.files', 'Show Files', '', () => { loadBrowser(); showLeftSection('files'); });
+registerCommand('pane.outline', 'Show Outline', '', () => showLeftSection('outline'));
+registerCommand('pane.toggle_left', 'Toggle Left Pane', '', () => toggleLeftPane());
+registerCommand('view.inspector', 'Toggle Inspector', 'Ctrl+Alt+I', () => toggleRightPane());
+registerCommand('view.width', 'Toggle Preview Width', 'Ctrl+Shift+W', () => {
+  preview.classList.toggle('narrow'); updateWidthIcon(); persistState();
+});
+registerCommand('view.theme', 'Cycle Theme', '', () => {
+  const cur = html.dataset.theme || 'auto';
+  const next = cur === 'auto' ? 'light' : cur === 'light' ? 'dark' : 'auto';
+  html.dataset.theme = next; resolveTheme(); mermaidInited = false;
+  flash(`Theme: ${next}`);
+  if (currentMode !== 'source') rerender();
+});
+registerCommand('navigate.heading', 'Go to Heading', 'Ctrl+Shift+O', () => openPalette('heading'));
+registerCommand('help', 'Keyboard Shortcuts', '', () => helpDialog.showModal());
+
+// ---------- Inspector ----------
+
+const inspFm = document.getElementById('insp-fm');
+const inspStats = document.getElementById('insp-stats');
+
+// Export buttons
+async function preparePrint() {
+  // Source mode doesn't rerender on input, and edit mode rerenders on a
+  // debounce — either can leave #preview stale when the user hits Print.
+  // Sync the current buffer and force a fresh render so what prints is
+  // what's in the editor, not an older preview snapshot.
+  if (currentMode === 'edit' || currentMode === 'source') {
+    currentSource = editor.value;
+  }
+  await rerender();
+}
+
+document.getElementById('btn-export-print').addEventListener('click', async () => {
+  await preparePrint();
+  const api = getApi();
+  if (api && api.print_document) await api.print_document();
+});
+document.getElementById('btn-export-html').addEventListener('click', async () => {
+  const api = getApi();
+  if (!api || !api.export_html) { flash('Export unavailable'); return; }
+  const content = (currentMode === 'edit' || currentMode === 'source') ? editor.value : currentSource;
+  const result = await api.export_html(content);
+  if (result && result.status === 'ok') flash('Exported HTML');
+  else if (result && result.status === 'error') flash(`Export failed: ${result.message}`);
+});
+
+registerCommand('export.print', 'Print', '', async () => {
+  await preparePrint();
+  const api = getApi();
+  if (api && api.print_document) await api.print_document();
+});
+registerCommand('export.html', 'Export HTML', '', async () => {
+  const api = getApi();
+  if (!api || !api.export_html) return;
+  const content = (currentMode === 'edit' || currentMode === 'source') ? editor.value : currentSource;
+  const result = await api.export_html(content);
+  if (result && result.status === 'ok') flash('Exported HTML');
+  else if (result && result.status === 'error') flash(`Export failed: ${result.message}`);
+});
+
+document.getElementById('btn-inspector-close').addEventListener('click', () => {
+  rightPaneCollapsed = true;
+  applyRightPane();
+  document.getElementById('btn-inspector').classList.remove('active');
+  persistState();
+});
+
+async function updateInspector() {
+  // Frontmatter
+  const api = getApi();
+  if (api && api.parse_frontmatter_fields) {
+    const fields = await api.parse_frontmatter_fields(currentSource);
+    if (fields && typeof fields === 'object' && Object.keys(fields).length > 0) {
+      let html = '<table>';
+      for (const [k, v] of Object.entries(fields)) {
+        const val = typeof v === 'object' ? JSON.stringify(v) : String(v);
+        html += `<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(val)}</td></tr>`;
+      }
+      html += '</table>';
+      inspFm.innerHTML = html;
+    } else {
+      inspFm.innerHTML = '<div class="inspector-placeholder">No frontmatter</div>';
+    }
+  }
+
+  // Stats
+  const text = currentSource || '';
+  const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+  const chars = text.length;
+  const headings = (text.match(/^#{1,6}\s/gm) || []).length;
+  const readMin = Math.max(1, Math.ceil(words / 250));
+  inspStats.innerHTML = [
+    statRow('Words', words.toLocaleString()),
+    statRow('Characters', chars.toLocaleString()),
+    statRow('Headings', headings),
+    statRow('Reading time', `~${readMin} min`),
+  ].join('');
+}
+
+function statRow(label, value) {
+  return `<div class="insp-stat-row"><span class="stat-label">${escapeHtml(label)}</span><span class="stat-value">${escapeHtml(String(value))}</span></div>`;
+}
+
+// ---------- Status bar ----------
+
+const sbMode = document.getElementById('sb-mode');
+const sbSave = document.getElementById('sb-save');
+const sbWords = document.getElementById('sb-words');
+const sbCursor = document.getElementById('sb-cursor');
+
+function updateStatusBar() {
+  sbMode.textContent = { read: 'Read', edit: 'Edit', source: 'Source' }[currentMode] || 'Read';
+  sbSave.textContent = dirty ? 'Modified' : 'Saved';
+  const text = currentSource || '';
+  const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+  sbWords.textContent = `${words.toLocaleString()} words`;
+  // Cursor position only in editor modes
+  const showCursor = currentMode === 'edit' || currentMode === 'source';
+  sbCursor.hidden = !showCursor;
+}
+
+function updateCursorPosition() {
+  if (currentMode !== 'edit' && currentMode !== 'source') return;
+  const pos = editor.selectionStart;
+  const text = editor.value.substring(0, pos);
+  const lines = text.split('\n');
+  const line = lines.length;
+  const col = lines[lines.length - 1].length + 1;
+  sbCursor.textContent = `Ln ${line}, Col ${col}`;
+  sbCursor.hidden = false;
+}
+
+editor.addEventListener('click', updateCursorPosition);
+editor.addEventListener('keyup', updateCursorPosition);
+
+sbMode.addEventListener('click', () => {
+  setMode({ read: 'edit', edit: 'source', source: 'read' }[currentMode]);
+});
+
+// ---------- Find in document ----------
+
+const findBar = document.getElementById('find-bar');
+const findInput = document.getElementById('find-input');
+const findCount = document.getElementById('find-count');
+const findCaseCheck = document.getElementById('find-case');
+const findWholeCheck = document.getElementById('find-whole');
+let findMatches = [];
+let findCurrentIdx = -1;
+let findMarks = [];
+
+function openFind() {
+  findBar.hidden = false;
+  findInput.focus();
+  findInput.select();
+  runFind();
+}
+
+function closeFind() {
+  findBar.hidden = true;
+  clearFindHighlights();
+  findCount.textContent = '';
+}
+
+function runFind() {
+  clearFindHighlights();
+  const query = findInput.value;
+  if (!query) { findCount.textContent = ''; findMatches = []; findCurrentIdx = -1; return; }
+  const caseSensitive = findCaseCheck.checked;
+  const wholeWord = findWholeCheck.checked;
+
+  if (currentMode === 'read' || currentMode === 'edit') {
+    findInPreview(query, caseSensitive, wholeWord);
+  } else {
+    findInEditor(query, caseSensitive, wholeWord);
+  }
+
+  if (findMatches.length > 0) {
+    findCurrentIdx = 0;
+    highlightCurrentMatch();
+    findCount.textContent = `1 of ${findMatches.length}`;
+  } else {
+    findCurrentIdx = -1;
+    findCount.textContent = 'No results';
+  }
+}
+
+function findInPreview(query, caseSensitive, wholeWord) {
+  findMatches = [];
+  findMarks = [];
+  const walker = document.createTreeWalker(preview, NodeFilter.SHOW_TEXT, null);
+  const textNodes = [];
+  let node;
+  while ((node = walker.nextNode())) textNodes.push(node);
+
+  const flags = caseSensitive ? 'g' : 'gi';
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = wholeWord ? `\\b${escaped}\\b` : escaped;
+  const re = new RegExp(pattern, flags);
+
+  for (const textNode of textNodes) {
+    const text = textNode.textContent;
+    let m;
+    const matches = [];
+    while ((m = re.exec(text)) !== null) matches.push({ start: m.index, end: m.index + m[0].length });
+    if (!matches.length) continue;
+
+    // Split the text node and wrap matches in <mark>
+    const parent = textNode.parentNode;
+    const frag = document.createDocumentFragment();
+    let lastIdx = 0;
+    for (const { start, end } of matches) {
+      if (start > lastIdx) frag.appendChild(document.createTextNode(text.slice(lastIdx, start)));
+      const mark = document.createElement('mark');
+      mark.className = 'find-highlight';
+      mark.textContent = text.slice(start, end);
+      frag.appendChild(mark);
+      findMarks.push(mark);
+      findMatches.push(mark);
+      lastIdx = end;
+    }
+    if (lastIdx < text.length) frag.appendChild(document.createTextNode(text.slice(lastIdx)));
+    parent.replaceChild(frag, textNode);
+  }
+}
+
+function findInEditor(query, caseSensitive, wholeWord) {
+  findMatches = [];
+  const text = editor.value;
+  const flags = caseSensitive ? 'g' : 'gi';
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = wholeWord ? `\\b${escaped}\\b` : escaped;
+  const re = new RegExp(pattern, flags);
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    findMatches.push({ start: m.index, end: m.index + m[0].length });
+  }
+}
+
+function highlightCurrentMatch() {
+  if (findCurrentIdx < 0 || findCurrentIdx >= findMatches.length) return;
+
+  if (currentMode === 'read' || currentMode === 'edit') {
+    // Preview mode: update mark classes
+    findMarks.forEach((m, i) => {
+      m.className = i === findCurrentIdx ? 'find-highlight-current' : 'find-highlight';
+    });
+    findMatches[findCurrentIdx].scrollIntoView({ block: 'center', behavior: 'smooth' });
+  } else {
+    // Editor mode: select the match
+    const match = findMatches[findCurrentIdx];
+    editor.focus();
+    editor.setSelectionRange(match.start, match.end);
+    // Scroll into view by briefly focusing
+    editor.blur();
+    editor.focus();
+  }
+}
+
+function clearFindHighlights() {
+  // Restore text nodes from marks
+  for (const mark of findMarks) {
+    const parent = mark.parentNode;
+    if (!parent) continue;
+    const text = document.createTextNode(mark.textContent);
+    parent.replaceChild(text, mark);
+    parent.normalize();
+  }
+  findMarks = [];
+  findMatches = [];
+  findCurrentIdx = -1;
+}
+
+function findNext() {
+  if (!findMatches.length) return;
+  findCurrentIdx = (findCurrentIdx + 1) % findMatches.length;
+  highlightCurrentMatch();
+  findCount.textContent = `${findCurrentIdx + 1} of ${findMatches.length}`;
+}
+
+function findPrev() {
+  if (!findMatches.length) return;
+  findCurrentIdx = (findCurrentIdx - 1 + findMatches.length) % findMatches.length;
+  highlightCurrentMatch();
+  findCount.textContent = `${findCurrentIdx + 1} of ${findMatches.length}`;
+}
+
+findInput.addEventListener('input', runFind);
+findCaseCheck.addEventListener('change', runFind);
+findWholeCheck.addEventListener('change', runFind);
+document.getElementById('find-next').addEventListener('click', findNext);
+document.getElementById('find-prev').addEventListener('click', findPrev);
+document.getElementById('find-close').addEventListener('click', closeFind);
+
+findInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { closeFind(); e.preventDefault(); return; }
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    if (e.shiftKey) findPrev(); else findNext();
+  }
+});
+
+registerCommand('find.open', 'Find in Document', 'Ctrl+F', () => openFind());
+
 // ---------- Outline ----------
 
-const outlinePanel = document.getElementById('outline-panel');
 const outlineNav = document.getElementById('outline-nav');
-document.getElementById('btn-outline').addEventListener('click', () => {
-  outlinePanel.hidden = !outlinePanel.hidden;
-  document.getElementById('btn-outline').classList.toggle('active', !outlinePanel.hidden);
-});
-document.getElementById('btn-outline-close').addEventListener('click', () => {
-  outlinePanel.hidden = true;
-  document.getElementById('btn-outline').classList.remove('active');
-});
 
 function slugify(text, used) {
   let s = text.toLowerCase().trim()
@@ -315,41 +1047,33 @@ function applyAutoCollapse(root) {
   }
 }
 
-document.getElementById('btn-collapse-all').addEventListener('click', () => {
+const btnCollapseAll = document.getElementById('btn-collapse-all');
+const btnExpandAll = document.getElementById('btn-expand-all');
+const btnAutoCollapse = document.getElementById('btn-auto-collapse');
+
+btnCollapseAll.addEventListener('click', () => {
   autoCollapseActive = false;
   manualOverrides.clear();
-  document.getElementById('btn-auto-collapse').classList.remove('active');
+  btnAutoCollapse.classList.remove('active');
   collapseAll(preview);
 });
-document.getElementById('btn-expand-all').addEventListener('click', () => {
+btnExpandAll.addEventListener('click', () => {
   autoCollapseActive = false;
   manualOverrides.clear();
-  document.getElementById('btn-auto-collapse').classList.remove('active');
+  btnAutoCollapse.classList.remove('active');
   expandAll(preview);
 });
-document.getElementById('btn-auto-collapse').addEventListener('click', () => {
+btnAutoCollapse.addEventListener('click', () => {
   autoCollapseActive = !autoCollapseActive;
-  document.getElementById('btn-auto-collapse').classList.toggle('active', autoCollapseActive);
+  btnAutoCollapse.classList.toggle('active', autoCollapseActive);
   if (autoCollapseActive) { manualOverrides.clear(); applyAutoCollapse(preview); }
 });
 
 // ---------- File browser (only when launched without a file arg) ----------
 
-const browserPanel = document.getElementById('browser-panel');
 const browserNav = document.getElementById('browser-nav');
 const btnFiles = document.getElementById('btn-files');
 let browserLoaded = false;
-
-function setBrowserOpen(open) {
-  browserPanel.hidden = !open;
-  btnFiles.classList.toggle('active', open);
-  if (open) {
-    // Opening the left drawer closes the right outline drawer so they
-    // don't both claim the sides simultaneously on narrow windows.
-    outlinePanel.hidden = true;
-    document.getElementById('btn-outline').classList.remove('active');
-  }
-}
 
 function renderEntries(entries, parent) {
   if (!Array.isArray(entries) || entries.length === 0) {
@@ -461,7 +1185,6 @@ browserNav.addEventListener('click', async (e) => {
   if (ok) {
     browserNav.querySelectorAll('.file-link.active').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
-    setBrowserOpen(false);
   } else {
     flash('Could not open file');
   }
@@ -469,15 +1192,252 @@ browserNav.addEventListener('click', async (e) => {
 
 btnFiles.addEventListener('click', async () => {
   if (!browseRoot) { flash('File browser unavailable'); return; }
-  const willOpen = browserPanel.hidden;
-  if (willOpen) await loadBrowser();
-  setBrowserOpen(willOpen);
+  if (leftPaneSection === 'files' && !leftPaneCollapsed) {
+    toggleLeftPane();
+  } else {
+    await loadBrowser();
+    showLeftSection('files');
+  }
 });
-document.getElementById('btn-browser-close').addEventListener('click', () => setBrowserOpen(false));
 // Auto-open the sidebar on first paint when no specific file was passed.
 if (browseRoot && !mdPath) {
-  loadBrowser().then(() => setBrowserOpen(true));
+  loadBrowser().then(() => showLeftSection('files'));
 }
+
+// ---------- Diagnostics ----------
+
+const diagList = document.getElementById('diagnostics-list');
+const sbDiagnostics = document.getElementById('sb-diagnostics');
+let diagDebounce = 0;
+let lastDiagIssues = [];
+
+async function runDiagnostics() {
+  const api = getApi();
+  if (!api || !api.run_diagnostics) return;
+  const issues = await api.run_diagnostics(currentSource);
+  lastDiagIssues = issues || [];
+  renderDiagnostics(lastDiagIssues);
+  updateDiagBadge(lastDiagIssues);
+}
+
+function renderDiagnostics(issues) {
+  diagList.innerHTML = '';
+  if (!issues.length) {
+    diagList.innerHTML = '<div class="diag-empty">No issues found</div>';
+    return;
+  }
+  const icons = { error: '●', warning: '▲', info: 'ℹ' };
+  for (const issue of issues) {
+    const div = document.createElement('div');
+    div.className = 'diag-item';
+    const icon = document.createElement('span');
+    icon.className = `diag-icon diag-icon-${issue.severity}`;
+    icon.textContent = icons[issue.severity] || '●';
+    const msg = document.createElement('span');
+    msg.className = 'diag-msg';
+    msg.textContent = issue.message;
+    div.appendChild(icon);
+    div.appendChild(msg);
+    if (issue.line) {
+      const line = document.createElement('span');
+      line.className = 'diag-line';
+      line.textContent = `L${issue.line}`;
+      div.appendChild(line);
+    }
+    diagList.appendChild(div);
+  }
+}
+
+function updateDiagBadge(issues) {
+  const errors = issues.filter(i => i.severity === 'error').length;
+  const warnings = issues.filter(i => i.severity === 'warning').length;
+  const total = errors + warnings;
+  if (total > 0) {
+    sbDiagnostics.hidden = false;
+    sbDiagnostics.innerHTML = errors > 0
+      ? `<span class="sb-diag-badge">${errors}</span> ${warnings > 0 ? `${warnings}⚠` : ''}`
+      : `${warnings}⚠`;
+  } else {
+    sbDiagnostics.hidden = true;
+  }
+}
+
+function scheduleDiagnostics() {
+  clearTimeout(diagDebounce);
+  diagDebounce = setTimeout(runDiagnostics, 500);
+}
+
+sbDiagnostics.addEventListener('click', () => showLeftSection('diagnostics'));
+
+registerCommand('diagnostics.show', 'Show Diagnostics', '', () => showLeftSection('diagnostics'));
+
+// ---------- Workspace search ----------
+
+const wsSearchInput = document.getElementById('ws-search-input');
+const wsSearchResults = document.getElementById('ws-search-results');
+const wsSearchCase = document.getElementById('ws-search-case');
+let wsSearchTimer = 0;
+
+function openWorkspaceSearch() {
+  showLeftSection('search');
+  wsSearchInput.focus();
+  wsSearchInput.select();
+}
+
+async function runWorkspaceSearch() {
+  const query = wsSearchInput.value.trim();
+  if (!query) { wsSearchResults.innerHTML = ''; return; }
+  const api = getApi();
+  if (!api || !api.search_workspace) {
+    wsSearchResults.innerHTML = '<div class="ws-search-empty">Search unavailable</div>';
+    return;
+  }
+  wsSearchResults.innerHTML = '<div class="ws-search-empty">Searching…</div>';
+  const caseSensitive = wsSearchCase.checked;
+  const results = await api.search_workspace(query, caseSensitive);
+  wsSearchResults.innerHTML = '';
+  if (!results || !results.length) {
+    wsSearchResults.innerHTML = '<div class="ws-search-empty">No results</div>';
+    return;
+  }
+  // Group by file
+  const groups = new Map();
+  for (const r of results) {
+    if (!groups.has(r.path)) groups.set(r.path, { name: r.name, relative: r.relative, hits: [] });
+    groups.get(r.path).hits.push(r);
+  }
+  for (const [filePath, group] of groups) {
+    const header = document.createElement('div');
+    header.className = 'ws-search-group';
+    header.textContent = group.relative;
+    header.title = filePath;
+    wsSearchResults.appendChild(header);
+    for (const hit of group.hits) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'ws-search-hit';
+      btn.dataset.path = hit.path;
+      const lineSpan = document.createElement('span');
+      lineSpan.className = 'ws-search-line';
+      lineSpan.textContent = `${hit.line}:`;
+      btn.appendChild(lineSpan);
+      // Highlight the match in context
+      const ctx = hit.context;
+      const qi = query.toLowerCase();
+      const idx = caseSensitive ? ctx.indexOf(query) : ctx.toLowerCase().indexOf(qi);
+      if (idx >= 0) {
+        btn.appendChild(document.createTextNode(ctx.slice(0, idx)));
+        const mark = document.createElement('span');
+        mark.className = 'ws-search-match';
+        mark.textContent = ctx.slice(idx, idx + query.length);
+        btn.appendChild(mark);
+        btn.appendChild(document.createTextNode(ctx.slice(idx + query.length)));
+      } else {
+        btn.appendChild(document.createTextNode(ctx));
+      }
+      btn.addEventListener('click', async () => {
+        if (!(await confirmDiscardIfDirty())) return;
+        const api2 = getApi();
+        if (api2 && api2.open_path) {
+          pendingHighlight = { path: hit.path, query, caseSensitive };
+          const ok = await api2.open_path(hit.path);
+          if (!ok) {
+            pendingHighlight = null;
+            flash('Could not open file');
+          }
+        }
+      });
+      wsSearchResults.appendChild(btn);
+    }
+  }
+}
+
+wsSearchInput.addEventListener('input', () => {
+  clearTimeout(wsSearchTimer);
+  wsSearchTimer = setTimeout(runWorkspaceSearch, 300);
+});
+wsSearchCase.addEventListener('change', () => {
+  if (wsSearchInput.value.trim()) runWorkspaceSearch();
+});
+wsSearchInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); runWorkspaceSearch(); }
+  if (e.key === 'Escape') { e.preventDefault(); wsSearchInput.blur(); }
+});
+
+registerCommand('search.workspace', 'Search Workspace', 'Ctrl+Shift+F', () => openWorkspaceSearch());
+
+// ---------- Sessions / Recent files ----------
+
+const recentList = document.getElementById('recent-list');
+
+async function loadSessions() {
+  const api = await whenApiReady();
+  if (!api || !api.get_recent_files) return;
+  const files = await api.get_recent_files();
+  recentList.innerHTML = '';
+  if (!files || !files.length) {
+    recentList.innerHTML = '<div class="recent-empty">No recent files</div>';
+    sessionsLoaded = true;
+    return;
+  }
+  for (const f of files) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'recent-item' + (f.exists ? '' : ' recent-item-missing');
+    btn.dataset.path = f.path;
+    btn.title = f.exists ? f.path : `${f.path} (not found)`;
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'recent-item-name';
+    nameSpan.textContent = f.name;
+    const pathSpan = document.createElement('span');
+    pathSpan.className = 'recent-item-path';
+    pathSpan.textContent = f.path;
+    btn.appendChild(nameSpan);
+    btn.appendChild(pathSpan);
+    recentList.appendChild(btn);
+  }
+  const clearBtn = document.createElement('button');
+  clearBtn.type = 'button';
+  clearBtn.className = 'recent-clear';
+  clearBtn.textContent = 'Clear recent files';
+  clearBtn.addEventListener('click', async () => {
+    const api = getApi();
+    if (api && api.clear_recent_files) await api.clear_recent_files();
+    recentList.innerHTML = '<div class="recent-empty">No recent files</div>';
+  });
+  recentList.appendChild(clearBtn);
+  sessionsLoaded = true;
+}
+
+recentList.addEventListener('click', async (e) => {
+  const btn = e.target && e.target.closest ? e.target.closest('.recent-item') : null;
+  if (!btn) return;
+  const path = btn.dataset.path;
+  if (!path) return;
+  if (!(await confirmDiscardIfDirty())) return;
+  const api = getApi();
+  if (!api || !api.open_recent) return;
+  const ok = await api.open_recent(path);
+  if (ok) {
+    sessionsLoaded = false; // refresh list next time
+  } else {
+    flash('Could not open file');
+  }
+});
+
+// Refresh sessions list when switching to the sessions tab
+const origShowLeftSection = showLeftSection;
+
+registerCommand('session.recent', 'Show Recent Files', '', () => {
+  loadSessions();
+  showLeftSection('sessions');
+});
+registerCommand('session.clear', 'Clear Recent Files', '', async () => {
+  const api = getApi();
+  if (api && api.clear_recent_files) await api.clear_recent_files();
+  sessionsLoaded = false;
+  flash('Recent files cleared');
+});
 
 // ---------- Theme ----------
 
@@ -505,6 +1465,8 @@ document.getElementById('btn-theme').addEventListener('click', () => {
   flash(`Theme: ${next}`);
   if (currentMode !== 'source') rerender();
 });
+
+document.getElementById('btn-inspector').addEventListener('click', () => toggleRightPane());
 
 // ---------- Open/Save ----------
 
@@ -539,7 +1501,7 @@ function updateWidthIcon() {
   btnWidth.querySelector('.icon-width-wide').style.display = narrow ? 'none' : '';
   btnWidth.querySelector('.icon-width-narrow').style.display = narrow ? '' : 'none';
 }
-btnWidth.addEventListener('click', () => { preview.classList.toggle('narrow'); updateWidthIcon(); });
+btnWidth.addEventListener('click', () => { preview.classList.toggle('narrow'); updateWidthIcon(); persistState(); });
 document.getElementById('btn-help').addEventListener('click', () => helpDialog.showModal());
 
 const saveConflictDialog = document.getElementById('save-conflict');
@@ -581,6 +1543,7 @@ function setDirty(v) {
   const api = getApi();
   // Best-effort mirror for native UIs that read outside the close path.
   if (api && api.set_dirty) api.set_dirty(!!v);
+  updateStatusBar();
 }
 
 // Synchronous dirty-state probe called by Python's `closing` handler via
@@ -605,9 +1568,32 @@ async function rerender() {
   const htmlOut = await api.render_markdown(currentSource);
   preview.innerHTML = htmlOut;
   await enhance(preview);
+  updateInspector();
+  scheduleDiagnostics();
 }
 
 const reloadDialog = document.getElementById('reload-conflict');
+
+// Set by the workspace-search click handler before api.open_path; consumed
+// by applyExternalDocument once the target file has rendered. Carries the
+// query into the in-document find bar so the user sees the hit highlighted
+// and scrolled into view instead of just a cold-open document.
+let pendingHighlight = null;
+
+function applyPendingHighlight(currentPath) {
+  if (!pendingHighlight) return;
+  if (pendingHighlight.path && currentPath && pendingHighlight.path !== currentPath) {
+    pendingHighlight = null;
+    return;
+  }
+  const { query, caseSensitive } = pendingHighlight;
+  pendingHighlight = null;
+  if (!query) return;
+  findInput.value = query;
+  findCaseCheck.checked = !!caseSensitive;
+  findWholeCheck.checked = false;
+  openFind();
+}
 
 async function applyExternalDocument({ html: htmlOut, source, name, path }) {
   currentSource = source;
@@ -623,6 +1609,9 @@ async function applyExternalDocument({ html: htmlOut, source, name, path }) {
   if (currentMode === 'edit' || currentMode === 'source') editor.value = source;
   preview.innerHTML = htmlOut;
   await enhance(preview);
+  updateInspector();
+  scheduleDiagnostics();
+  applyPendingHighlight(path);
   // Tell Python we committed to this version so it can advance the
   // save-conflict baseline. Without this, a rejected watch reload would
   // leave Python's baseline out-of-sync with reality.
@@ -668,6 +1657,27 @@ window.mdvwSetDocument = async function (payload) {
   await applyExternalDocument(payload);
 };
 
+window.mdvwConfirmTrayQuit = async function () {
+  if (!dirty) {
+    const api = getApi();
+    if (api && api.confirm_quit) await api.confirm_quit();
+    return;
+  }
+  const choice = await new Promise((resolve) => {
+    unsavedPrompt.addEventListener('close', () => resolve(unsavedPrompt.returnValue || 'cancel'), { once: true });
+    unsavedPrompt.showModal();
+  });
+  if (choice === 'save') {
+    await save();
+    if (dirty) return; // save failed or cancelled
+  } else if (choice === 'cancel') {
+    return; // user cancelled — stay running
+  }
+  // 'discard' or save succeeded
+  const api = getApi();
+  if (api && api.confirm_quit) await api.confirm_quit();
+};
+
 window.mdvwPromptAssociation = function () {
   assocDialog.addEventListener('close', async () => {
     const api = getApi();
@@ -679,6 +1689,83 @@ window.mdvwPromptAssociation = function () {
   }, { once: true });
   assocDialog.showModal();
 };
+
+// ---------- Image paste/drop ----------
+
+async function handleImagePaste(e) {
+  if (currentMode !== 'edit' && currentMode !== 'source') return;
+  const items = e.clipboardData && e.clipboardData.items;
+  if (!items) return;
+  for (const item of items) {
+    if (!item.type.startsWith('image/')) continue;
+    e.preventDefault();
+    const file = item.getAsFile();
+    if (!file) continue;
+    const dataUrl = await fileToDataUrl(file);
+    await insertImage(dataUrl, '');
+    return;
+  }
+}
+
+async function handleImageDrop(e) {
+  if (currentMode !== 'edit' && currentMode !== 'source') return;
+  const files = e.dataTransfer && e.dataTransfer.files;
+  if (!files || !files.length) return;
+  for (const file of files) {
+    if (!file.type.startsWith('image/')) continue;
+    e.preventDefault();
+    const dataUrl = await fileToDataUrl(file);
+    await insertImage(dataUrl, file.name);
+    return;
+  }
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(file);
+  });
+}
+
+async function insertImage(dataUrl, suggestedName) {
+  if (!dataUrl) { flash('Could not read image'); return; }
+  const api = getApi();
+  if (!api || !api.save_image) { flash('Image save unavailable'); return; }
+  const result = await api.save_image(dataUrl, suggestedName);
+  if (result && result.status === 'ok') {
+    const md = `![](${result.relative_path})`;
+    const pos = editor.selectionStart;
+    const before = editor.value.substring(0, pos);
+    const after = editor.value.substring(editor.selectionEnd);
+    editor.value = before + md + after;
+    editor.selectionStart = editor.selectionEnd = pos + md.length;
+    setDirty(true);
+    currentSource = editor.value;
+    if (currentMode === 'edit') {
+      clearTimeout(renderDebounce);
+      renderDebounce = setTimeout(() => rerender(), 120);
+    }
+    flash(`Image saved: ${result.relative_path}`);
+  } else if (result && result.status === 'error') {
+    flash(result.message || 'Image save failed');
+  }
+}
+
+editor.addEventListener('paste', handleImagePaste);
+editor.addEventListener('drop', handleImageDrop);
+editor.addEventListener('dragover', (e) => {
+  if (currentMode === 'edit' || currentMode === 'source') e.preventDefault();
+});
+
+registerCommand('insert.image', 'Paste Image as Attachment', '', async () => {
+  if (currentMode !== 'edit' && currentMode !== 'source') {
+    flash('Switch to Edit or Source mode first');
+    return;
+  }
+  flash('Use Ctrl+V to paste an image from clipboard');
+});
 
 // ---------- Toast ----------
 
@@ -692,6 +1779,18 @@ function flash(msg) {
 
 // ---------- Init ----------
 
+// Apply persisted pane state.
+applyLeftPane();
+applyRightPane();
+if (leftPaneSection) showLeftSection(leftPaneSection);
+// If left pane was saved as collapsed, restore that.
+if (uiState.left_pane_collapsed) { leftPaneCollapsed = true; applyLeftPane(); }
+if (uiState.preview_narrow) preview.classList.add('narrow');
+btnFiles.classList.toggle('active', !leftPaneCollapsed && leftPaneSection === 'files');
+
 await enhance(preview);
+updateInspector();
+updateStatusBar();
+scheduleDiagnostics();
 // startMode preset (from CLI --edit etc.)
 if (startMode && startMode !== 'read') await setMode(startMode);

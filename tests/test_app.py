@@ -564,6 +564,337 @@ def test_open_path_loads_valid_in_root_file(tmp_path):
     assert '"name": "doc.md"' in call
 
 
+def test_export_html_preserves_existing_file_on_failure(tmp_path, monkeypatch):
+    """Export failing mid-write must not truncate a pre-existing target file."""
+    existing = tmp_path / "report.html"
+    existing.write_text("ORIGINAL HTML", encoding="utf-8")
+
+    api = app_mod.JsApi()
+    api._window = MagicMock()
+    api._window.create_file_dialog.return_value = str(existing)
+
+    # Simulate a crash at the atomic-swap step.
+    def boom(src, dst):
+        raise OSError("simulated replace failure")
+
+    monkeypatch.setattr(app_mod.os, "replace", boom)
+
+    result = api.export_html("# hello\n")
+    assert result["status"] == "error"
+    # Pre-existing file is untouched and no .tmp leftovers remain.
+    assert existing.read_text(encoding="utf-8") == "ORIGINAL HTML"
+    assert [p for p in tmp_path.iterdir() if p.suffix == ".tmp"] == []
+
+
+def test_export_html_writes_when_target_is_new(tmp_path):
+    api = app_mod.JsApi()
+    api._window = MagicMock()
+    target = tmp_path / "out.html"
+    api._window.create_file_dialog.return_value = str(target)
+
+    result = api.export_html("# hello\n")
+    assert result == {"status": "ok", "path": str(target)}
+    assert "<h1>hello</h1>" in target.read_text(encoding="utf-8")
+
+
+def test_open_recent_loads_file_outside_browse_root(tmp_path, monkeypatch):
+    """Sessions list entries live across workspaces; ``open_recent`` must
+    succeed even when the target is outside the current ``_browse_root``
+    — provided it is in the persisted recent-files allowlist."""
+    from mdvw import state
+
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+
+    inside = tmp_path / "inside"
+    inside.mkdir()
+    outside = tmp_path / "outside.md"
+    outside.write_text("# elsewhere", encoding="utf-8")
+    state.add_recent(str(outside.resolve()))
+
+    api = app_mod.JsApi()
+    api._browse_root = inside
+    api._window = MagicMock()
+
+    assert api.open_recent(str(outside)) is True
+    assert api._current_path == outside.resolve()
+
+
+def test_open_recent_rejects_non_markdown_suffix(tmp_path, monkeypatch):
+    from mdvw import state
+
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    target = tmp_path / "notes.txt"
+    target.write_text("x", encoding="utf-8")
+    state.add_recent(str(target.resolve()))
+
+    api = app_mod.JsApi()
+    api._browse_root = tmp_path
+    api._window = MagicMock()
+
+    assert api.open_recent(str(target)) is False
+    assert api._window.evaluate_js.call_count == 0
+
+
+def test_open_recent_rejects_missing_file(tmp_path, monkeypatch):
+    from mdvw import state
+
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    ghost = tmp_path / "ghost.md"
+    state.add_recent(str(ghost.resolve()))  # listed but never created
+
+    api = app_mod.JsApi()
+    api._browse_root = tmp_path
+    api._window = MagicMock()
+
+    assert api.open_recent(str(ghost)) is False
+    assert api._window.evaluate_js.call_count == 0
+
+
+def test_open_recent_rejects_empty_or_non_string():
+    api = app_mod.JsApi()
+    api._window = MagicMock()
+
+    assert api.open_recent("") is False
+    assert api.open_recent(None) is False  # type: ignore[arg-type]
+    assert api._window.evaluate_js.call_count == 0
+
+
+def test_save_ui_state_cannot_poison_recent_files_allowlist(
+    tmp_path, monkeypatch,
+):
+    """The renderer reaches ``save_ui_state`` directly via pywebview. If it
+    could write ``recent_files``, it could smuggle an arbitrary on-disk
+    markdown path onto ``open_recent``'s allowlist and exfiltrate it."""
+    from mdvw import state
+
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    secret = tmp_path / "secret.md"
+    secret.write_text("# secret", encoding="utf-8")
+
+    api = app_mod.JsApi()
+    api._browse_root = tmp_path
+    api._window = MagicMock()
+
+    # Attempt to poison the allowlist.
+    api.save_ui_state({
+        "recent_files": [str(secret.resolve())],
+        "last_file": str(secret.resolve()),
+        "last_browse_root": str(tmp_path),
+        # Plus a legit key, to be sure the merge still runs.
+        "left_pane_width": 333,
+    })
+
+    # Trust-boundary keys are unchanged (defaults), legit key took effect.
+    data = state.load()
+    assert data["recent_files"] == []
+    assert data["last_file"] is None
+    assert data["last_browse_root"] is None
+    assert data["left_pane_width"] == 333
+
+    # And the attacker's chosen path is still rejected by open_recent.
+    assert api.open_recent(str(secret)) is False
+    assert api._window.evaluate_js.call_count == 0
+
+
+def test_save_ui_state_rejects_wrong_types(tmp_path, monkeypatch):
+    """Schema enforcement: a string where an int is expected is dropped,
+    not coerced."""
+    from mdvw import state
+
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+
+    api = app_mod.JsApi()
+    api.save_ui_state({
+        "left_pane_width": "350",      # wrong type
+        "left_pane_collapsed": 1,      # int, not bool
+        "mode": "edit",                # ok
+        "preview_narrow": True,        # ok
+    })
+    data = state.load()
+    assert data["left_pane_width"] == 280  # default preserved
+    assert data["left_pane_collapsed"] is False  # default preserved
+    assert data["mode"] == "edit"
+    assert data["preview_narrow"] is True
+
+
+def test_open_recent_rejects_path_not_in_allowlist(tmp_path, monkeypatch):
+    """A sanitizer bypass calling ``open_recent`` with an arbitrary on-disk
+    markdown file must be rejected: only paths actually present in the
+    persisted recent-files list are loadable."""
+    from mdvw import state
+
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    listed = tmp_path / "listed.md"
+    listed.write_text("# ok", encoding="utf-8")
+    unlisted = tmp_path / "secret.md"
+    unlisted.write_text("# secret", encoding="utf-8")
+    state.add_recent(str(listed.resolve()))
+
+    api = app_mod.JsApi()
+    api._browse_root = tmp_path
+    api._window = MagicMock()
+
+    assert api.open_recent(str(unlisted)) is False
+    assert api._window.evaluate_js.call_count == 0
+    # Sanity: the allowed entry still opens.
+    assert api.open_recent(str(listed)) is True
+
+
+def test_autoreopen_skips_last_file_from_other_workspace(
+    tmp_path, monkeypatch,
+):
+    """No-arg launch must not silently reopen a document that sits outside
+    the current cwd — that leaks prior-workspace state into a new one."""
+    from mdvw import state
+
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+
+    workspace_a = tmp_path / "a"
+    workspace_b = tmp_path / "b"
+    workspace_a.mkdir()
+    workspace_b.mkdir()
+    doc_a = workspace_a / "notes.md"
+    doc_a.write_text("# a", encoding="utf-8")
+
+    state.set_key("last_file", str(doc_a))
+
+    # Simulate the relevant slice of run()'s restore logic for cwd=workspace_b.
+    monkeypatch.chdir(workspace_b)
+    browse_root = Path.cwd().resolve()
+    last = state.get("last_file")
+    restored: Path | None = None
+    if last:
+        last_path = Path(last).resolve()
+        if last_path.is_file() and last_path.is_relative_to(browse_root):
+            restored = last_path
+    assert restored is None
+
+
+def test_autoreopen_restores_last_file_inside_workspace(
+    tmp_path, monkeypatch,
+):
+    from mdvw import state
+
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+
+    workspace = tmp_path / "proj"
+    workspace.mkdir()
+    doc = workspace / "notes.md"
+    doc.write_text("# hi", encoding="utf-8")
+
+    state.set_key("last_file", str(doc))
+
+    monkeypatch.chdir(workspace)
+    browse_root = Path.cwd().resolve()
+    last = state.get("last_file")
+    restored: Path | None = None
+    if last:
+        last_path = Path(last).resolve()
+        if last_path.is_file() and last_path.is_relative_to(browse_root):
+            restored = last_path
+    assert restored == doc.resolve()
+
+
+def test_save_image_writes_and_returns_relative_path(tmp_path):
+    import base64
+
+    doc = tmp_path / "note.md"
+    doc.write_text("# hi", encoding="utf-8")
+    api = app_mod.JsApi()
+    api._current_path = doc
+    api._window = MagicMock()
+
+    raw = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
+    data_url = "data:image/png;base64," + base64.b64encode(raw).decode("ascii")
+    result = api.save_image(data_url, "pasted.png")
+
+    assert result["status"] == "ok"
+    rel = result["relative_path"]
+    assert rel.startswith("images/")
+    target = tmp_path / rel
+    assert target.read_bytes() == raw
+
+
+def test_save_image_rejects_oversized_payload(tmp_path):
+    doc = tmp_path / "note.md"
+    doc.write_text("# hi", encoding="utf-8")
+    api = app_mod.JsApi()
+    api._current_path = doc
+
+    # Well past the 25 MB decoded cap. Use a single-char body — the size
+    # check runs on the encoded length before we try to decode.
+    oversize = "A" * (api._IMAGE_MAX_DECODED_BYTES * 2)
+    data_url = f"data:image/png;base64,{oversize}"
+    result = api.save_image(data_url, "huge.png")
+
+    assert result == {"status": "error", "message": "Image too large"}
+    # No leftover file or tmp under images/.
+    images_dir = tmp_path / "images"
+    if images_dir.exists():
+        assert list(images_dir.iterdir()) == []
+
+
+def test_save_image_rejects_oversized_after_decode(tmp_path):
+    """Enforce the cap on decoded bytes even when the encoded form slips
+    just under the pre-decode bound (e.g. a payload that decodes slightly
+    larger than max_encoded * 3/4)."""
+    import base64
+
+    doc = tmp_path / "note.md"
+    doc.write_text("# hi", encoding="utf-8")
+    api = app_mod.JsApi()
+    api._current_path = doc
+    # Shrink the cap so we can exercise the post-decode branch cheaply.
+    api._IMAGE_MAX_DECODED_BYTES = 1024  # type: ignore[misc]
+
+    raw = b"X" * 2000
+    data_url = "data:image/png;base64," + base64.b64encode(raw).decode("ascii")
+    result = api.save_image(data_url, "big.png")
+
+    assert result == {"status": "error", "message": "Image too large"}
+
+
+def test_save_image_rejects_invalid_base64(tmp_path):
+    doc = tmp_path / "note.md"
+    doc.write_text("# hi", encoding="utf-8")
+    api = app_mod.JsApi()
+    api._current_path = doc
+
+    # Contains characters outside the base64 alphabet — validate=True rejects.
+    data_url = "data:image/png;base64,!!!not-base64!!!"
+    result = api.save_image(data_url, "bad.png")
+
+    assert result == {"status": "error", "message": "Invalid image data"}
+
+
+def test_save_image_atomic_leaves_nothing_on_replace_failure(
+    tmp_path, monkeypatch,
+):
+    """A failed write must not leave a half-written attachment or a stray
+    tmp file in ``images/``."""
+    import base64
+
+    doc = tmp_path / "note.md"
+    doc.write_text("# hi", encoding="utf-8")
+    api = app_mod.JsApi()
+    api._current_path = doc
+
+    def boom(src, dst):
+        raise OSError("simulated replace failure")
+
+    monkeypatch.setattr(app_mod.os, "replace", boom)
+
+    raw = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+    data_url = "data:image/png;base64," + base64.b64encode(raw).decode("ascii")
+    result = api.save_image(data_url, "pasted.png")
+
+    assert result["status"] == "error"
+    images_dir = tmp_path / "images"
+    # Neither the target nor the tmp sibling survives.
+    leftover = list(images_dir.iterdir()) if images_dir.exists() else []
+    assert leftover == []
+
+
 def test_vendor_manifest_matches_on_disk():
     """Release-time integrity: committed vendor files match the manifest hashes."""
     import subprocess

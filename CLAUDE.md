@@ -2,10 +2,22 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Working style
+
+Behavioral defaults. Use judgement on trivial tasks; these bias toward caution over speed.
+
+**Think before coding.** State assumptions explicitly; if uncertain, ask. If multiple interpretations exist, surface them — don't pick silently. If a simpler approach exists, say so. When something is unclear, stop and name what's confusing rather than guessing.
+
+**Simplicity first.** Write the minimum code that solves the problem. No features, abstractions, configurability, or error handling beyond what was asked. If 200 lines could be 50, rewrite. "Would a senior engineer call this overcomplicated?" — if yes, simplify.
+
+**Surgical changes.** Touch only what you must. Don't "improve" adjacent code, comments, or formatting. Don't refactor things that aren't broken. Match existing style. Remove imports/variables your changes orphaned; leave pre-existing dead code alone (mention it instead). Every changed line should trace to the request.
+
+**Goal-driven execution.** Turn asks into verifiable goals ("Fix the bug" → "Write a failing test that reproduces it, then make it pass"). For multi-step work, state the plan as `step → verify` pairs and loop until each check passes.
+
 ## Commands
 
-- `pytest -q` — run the test suite (46 tests as of 0.1.0).
-- `ruff check src tests scripts` — lint. CI fails on any warning; don't commit unless clean.
+- `pytest -q` — run the test suite (112 tests as of 0.6.0.dev0).
+- `ruff check src tests scripts` — lint. Strict config (`E F W I UP B SIM RUF`, no ignores); CI fails on any warning. New code must land clean.
 - `python scripts/fetch_vendor.py --verify` — verify vendored JS/CSS hashes match `src/mdvw/assets/vendor/manifest.json`. CI runs this on every build.
 
 ## Vendor integrity (hard invariant)
@@ -47,4 +59,4 @@ python scripts/release.py --post-release 0.3.0.dev0   # reopen dev cycle
 
 - `app.py` writes a per-instance `index.html` to a fresh `tempfile.mkdtemp("mdvw-")` dir (not the package dir — that may be read-only in installed envs). App asset URLs are rewritten to absolute `file://` paths against the packaged assets dir; user-markdown relative URLs are rewritten against the document's own directory. No document-wide `<base href>` (it would misdirect user links).
 - `save_file` uses `_atomic_write_text` (tmp + fsync + `os.replace`) and has mtime/size conflict detection via `_loaded_fingerprint`. `_load(reason="watch")` parks the new fingerprint in `_pending_fingerprint`; JS must call `api.ack_reload()` to promote it. Rejecting a watched reload leaves the old baseline intact so the next save still prompts.
-- GitHub Actions are pinned to full commit SHAs with the readable tag as a trailing comment. When bumping, look up the new SHAs with `gh api repos/<name>/commits/<tag>`.
+- GitHub Actions are pinned to full commit SHAs with the readable tag as a trailing comment. When bumping, look up the new SHAs with `gh api repos/<name>/commits/<tag>`. 
