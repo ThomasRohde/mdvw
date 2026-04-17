@@ -1441,11 +1441,19 @@ registerCommand('session.clear', 'Clear Recent Files', '', async () => {
 
 // ---------- Theme ----------
 
+function syncTitlebarTheme(dark) {
+  const api = getApi();
+  if (!api || !api.set_titlebar_dark) return;
+  try { Promise.resolve(api.set_titlebar_dark(dark)).catch(() => {}); }
+  catch { /* bridge not ready — non-fatal */ }
+}
+
 function resolveTheme() {
   const attr = html.dataset.theme;
   const sysDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
   const resolved = attr === 'auto' ? (sysDark ? 'dark' : 'light') : attr;
   html.dataset.resolvedTheme = resolved;
+  syncTitlebarTheme(resolved === 'dark');
   return resolved;
 }
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
@@ -1455,6 +1463,13 @@ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () 
   if (currentMode !== 'source') rerender();
 });
 resolveTheme();
+// The first resolveTheme() runs before pywebview has injected its bridge,
+// so the Python-side `_on_loaded` handler paints the initial title bar
+// from the system registry. Re-sync here so any later divergence between
+// app theme and system theme (e.g. explicit user toggle) is honoured.
+window.addEventListener('pywebviewready', () => {
+  syncTitlebarTheme(html.dataset.resolvedTheme === 'dark');
+}, { once: true });
 
 document.getElementById('btn-theme').addEventListener('click', () => {
   const cur = html.dataset.theme || 'auto';

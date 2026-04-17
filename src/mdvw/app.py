@@ -264,9 +264,23 @@ class JsApi:
         # Populated by run(). None means "single-file launch"; the file
         # browser sidebar is only offered when this is set.
         self._browse_root: Path | None = None
+        # Cached top-level HWND for DWM title-bar theming. Populated once
+        # on the `loaded` event; set_titlebar_dark is a no-op until then.
+        self._hwnd: int | None = None
 
     def set_dirty(self, value: bool) -> None:
         self._dirty = bool(value)
+
+    def set_titlebar_dark(self, dark: bool) -> None:
+        """Flip the Windows title bar to dark/light to match the app theme.
+
+        Called from JS whenever the resolved theme changes (user toggle,
+        system `prefers-color-scheme` change, pywebview bridge coming
+        online). No-op off Windows or before the HWND has been resolved.
+        """
+        if sys.platform != "win32" or self._hwnd is None:
+            return
+        _apply_titlebar_theme(self._hwnd, bool(dark))
 
     def confirm_quit(self) -> None:
         """Called from JS when the user confirms quit from the tray dialog."""
@@ -771,6 +785,66 @@ class JsApi:
             self._window.evaluate_js(f"window.mdvwSetDocument({payload})")
 
 
+def _apply_titlebar_theme(hwnd: int, dark: bool) -> None:
+    """Toggle Windows immersive dark-mode title bar via DWM.
+
+    ``DWMWA_USE_IMMERSIVE_DARK_MODE`` is attribute 20 on Win10 20H1+
+    (build 19041) and was the undocumented 19 on earlier insider builds.
+    We try 20 first and fall back to 19 — both fail silently on older
+    Windows versions, in which case the chrome just stays light.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        dwmapi = ctypes.windll.dwmapi
+        value = ctypes.c_int(1 if dark else 0)
+        for attr in (20, 19):
+            if dwmapi.DwmSetWindowAttribute(
+                hwnd, attr, ctypes.byref(value), ctypes.sizeof(value),
+            ) == 0:
+                return
+    except Exception as exc:
+        _stderr_print(f"[mdvw] could not set titlebar theme: {exc!r}")
+
+
+def _find_hwnd_by_title(title: str) -> int | None:
+    """Return the top-level HWND whose title matches ``title``, or None."""
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+
+        hwnd = ctypes.windll.user32.FindWindowW(None, title)
+        return int(hwnd) or None
+    except Exception:
+        return None
+
+
+def _system_apps_dark() -> bool:
+    """Return True iff Windows is currently using the dark apps theme.
+
+    Reads ``AppsUseLightTheme`` under the Personalize key: 0 = dark,
+    1 = light. Used for the initial DWM apply so the title bar matches
+    the HTML's ``auto`` theme resolution from the very first paint
+    instead of flashing light → dark once JS boots.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        import winreg
+
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+        ) as key:
+            val, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+            return val == 0
+    except OSError:
+        return False
+
+
 def _set_window_icon(window: webview.Window, title: str) -> None:
     """Attach the packaged icon.ico to the running window via WM_SETICON.
 
@@ -964,6 +1038,15 @@ def run(file: Path | None, edit: bool, tray: bool) -> int:
 
     def _on_loaded() -> None:
         _set_window_icon(window, window_title)
+        # Cache HWND and apply the initial title-bar theme from the
+        # system setting. The template starts in `data-theme="auto"`, so
+        # matching the registry here aligns the chrome with what JS will
+        # resolve on first paint. Subsequent changes come through the
+        # `set_titlebar_dark` bridge method.
+        hwnd = _find_hwnd_by_title(window_title)
+        if hwnd is not None:
+            api._hwnd = hwnd
+            _apply_titlebar_theme(hwnd, _system_apps_dark())
         _bring_to_front()
         _maybe_prompt_association(window)
 

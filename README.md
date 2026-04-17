@@ -23,17 +23,22 @@ A small Windows desktop app that opens a `.md` file and renders it beautifully �
 
 ## Why
 
-Most Markdown viewers either need a browser tab, a heavy IDE, or pull fonts and scripts from a CDN at render time. `mdvw` is a single `pip install` away, opens fast, works without internet, and treats the document as untrusted — a hostile `.md` file can't fetch remote resources, navigate the native bridge, or overwrite your file without a conflict prompt.
+Most Markdown viewers either need a browser tab, a heavy IDE, or pull fonts and scripts from a CDN at render time. `mdvw` is a single `pip install` away, opens fast, and works without internet — everything needed to render ships inside the wheel.
 
 ## Features
 
 - **Three modes** — Read, Edit (live split), Source (raw `.md` in a dark editor). Switch with `Ctrl+1/2/3` or cycle with `E`.
 - **Offline first** — KaTeX (math), Mermaid (diagrams), highlight.js (20 languages), and webfonts all ship inside the wheel, SHA256-pinned via a manifest.
 - **GFM + extensions** — tables, task lists, footnotes, strikethrough. Plus `==highlight==`, `++underline++`, and `{color:red}…{/color}` / `{color:#hex}…{/color}`.
+- **YAML frontmatter card** — `---`-fenced metadata renders as a styled card at the top of the preview; invalid YAML shows an error card without breaking the body.
 - **Live reload** — external changes on disk re-render instantly; unsaved edits get a conflict prompt rather than being silently overwritten.
-- **Outline drawer + collapsible sections** — navigate by heading or collapse sections with `▲ All` / `▼ All` / `▶ Auto`.
-- **Native feel** — system tray, follow-system dark/light theme, taskbar icon (M↓), `.md` file association via `mdvw --register`.
-- **Hardened** — 7 rounds of adversarial review before 0.1.0 (atomic saves, conflict detection, `<script>` breakout defense, remote-image blocking, etc. — see [SECURITY.md](#security) if you're curious).
+- **Command palette** — `Ctrl+P` blends slash-commands with filename matches from the workspace into one fuzzy-searchable input.
+- **Find in document + workspace search** — `Ctrl+F` for an in-page find bar (match count, case/whole-word toggles); `Ctrl+Shift+F` greps every `.md` under the launch directory and jumps to the match.
+- **Outline, files, recent, diagnostics** — switchable left-pane sections. The outline supports per-heading collapse plus `▲ All` / `▼ All` / `▶ Auto`. Diagnostics flag invalid frontmatter, broken relative links, and blocked remote refs.
+- **Inspector + status bar** — right-pane inspector shows parsed frontmatter and document stats (words, headings, reading time); footer status bar tracks mode, dirty state, word count, cursor position, and the mdvw version.
+- **Image paste** — pasting an image in the editor saves it next to the document and inserts a relative `![](…)` reference.
+- **Export + print** — `Export HTML…` writes a single self-contained file (inlined CSS, fonts, and image data URIs); `Print…` hands off to the system print dialog for print-to-PDF.
+- **Native feel** — system tray with close-to-tray, single-instance file handoff, follow-system dark/light theme (title bar included), taskbar icon (M↓), `.md` file association via `mdvw --register`.
 
 ## Install
 
@@ -60,11 +65,16 @@ mdvw --unregister          # remove the association
 
 | Key | Action |
 |---|---|
+| `Ctrl+P` | Command palette (commands + workspace filenames) |
 | `Ctrl+1` / `Ctrl+2` / `Ctrl+3` | Read / Edit (split) / Source |
 | `E` | Cycle Read → Edit → Source |
 | `Ctrl+O` | Open file |
 | `Ctrl+S` | Save (atomic; prompts on disk conflict) |
+| `Ctrl+F` | Find in document |
+| `Ctrl+Shift+F` | Search workspace |
+| `Ctrl+Shift+O` | Go to heading |
 | `Ctrl+Shift+W` | Toggle narrow / wide preview |
+| `Ctrl+Alt+I` | Toggle inspector |
 
 ## Markdown extensions
 
@@ -95,18 +105,9 @@ graph LR
 ```
 ````
 
-## Security
+## Safety notes
 
-`mdvw` treats every `.md` file as untrusted input. A hostile document cannot:
-
-- Break out of the JSON `<script>` bootstrap (all `<`/`>`/`&` escaped as `\uXXXX`)
-- Shadow bootstrap DOM ids (user `id` attributes stripped by the sanitizer)
-- Fetch remote resources — `<img src="http(s)://…">`, protocol-relative `//…`, and UNC `\\server` refs all dropped
-- Navigate the WebView to a different page (all link clicks routed to the OS shell; `js_api` bridge stays isolated)
-- ShellExecute a local program — `file:` links rejected at both sanitizer and shell-open layers
-- Silently overwrite your on-disk edits — `save_file` checks the file's mtime/size fingerprint against what was loaded and prompts if it changed
-
-Saves are atomic (`tempfile` + `fsync` + `os.replace`). Vendored JS/CSS is SHA256-verified at build time; the release workflow refuses to build if a vendor byte changed.
+Documents render through an HTML sanitizer with no network access, so opening an unfamiliar `.md` file doesn't fetch remote resources or leak that you opened it. Saves are atomic and notice when the file changed on disk between load and save. Vendored JS/CSS is SHA256-pinned and verified in CI.
 
 ## How it works (one paragraph)
 
