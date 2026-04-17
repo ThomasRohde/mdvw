@@ -2,6 +2,47 @@
 
 
 ## [Unreleased]
+### Features
+- **Workspace text search.** A new left-pane search section
+  (Ctrl+Shift+F) scans every `.md`/`.markdown` file under the workspace
+  root for a query string, grouped by file with the matched line
+  highlighted in the result list. Symlinked files that resolve outside
+  the workspace are skipped so the search cannot read arbitrary disk
+  content. Clicking a hit opens the file and pre-fills the in-document
+  find bar with the same query, so the match is highlighted and
+  scrolled into view instead of cold-opening the document.
+- **Find in document.** Ctrl+F opens a find bar with match count,
+  previous/next navigation, and case-sensitive / whole-word toggles.
+  Works in Read and Edit modes (highlights in preview) and in Source
+  mode (selects in the textarea).
+- **Document diagnostics.** A new diagnostics section flags invalid
+  frontmatter, broken relative links/images, and blocked remote
+  references. Runs on demand and re-evaluates after each render.
+- **Self-contained HTML export.** `export_html` produces a single-file
+  HTML with inlined CSS, fonts, and image data URIs — the exported
+  document renders identically to the preview, fully offline. Paired
+  with `print_document` for print-to-PDF via the WebView.
+- **Command palette.** A unified palette blends slash-command matches
+  with filename matches from the workspace (when a browse root is
+  set), so filename jumps and command execution share one input.
+- **Image paste.** Pasting an image from the clipboard into the editor
+  saves it as a PNG alongside the current document and inserts a
+  relative `![](…)` reference.
+- **Document inspector + status bar.** A left-pane Inspector shows
+  parsed frontmatter fields and document stats (words, characters,
+  headings, reading time). A footer status bar shows the active mode,
+  dirty state, word count, and editor cursor position.
+
+### Changed
+- **Left pane sections.** The sidebar replaces the single file tree
+  with switchable sections: Files, Recent, Outline, Search,
+  Diagnostics, and Inspector. Active section and pane geometry
+  persist in `%APPDATA%/mdvw/state.json`, kept separate from
+  `config.json` (user preferences) so transient UI state doesn't
+  pollute the user-facing config.
+- **Outline collapse/expand.** Headings can be collapsed to hide all
+  nested content in the preview. Auto-collapse respects child state
+  and preserves manual overrides across re-renders.
 
 
 ## [0.5.1] — 2026-04-16
