@@ -1,7 +1,7 @@
 # Changelog
 
 
-## [Unreleased]
+## [0.6.2] — 2026-04-17
 ### Features
 - **Dark title bar in dark mode.** On Windows 10 1809+/11 the window
   chrome now tracks the resolved app theme via
