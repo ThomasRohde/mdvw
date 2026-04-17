@@ -1,6 +1,9 @@
 # Changelog
 
 
+## [Unreleased]
+
+
 ## [0.6.0] — 2026-04-17
 ### Features
 - **Workspace text search.** A new left-pane search section
