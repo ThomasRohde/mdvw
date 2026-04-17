@@ -2,6 +2,24 @@
 
 
 ## [Unreleased]
+### Features
+- **Dark title bar in dark mode.** On Windows 10 1809+/11 the window
+  chrome now tracks the resolved app theme via
+  `DWMWA_USE_IMMERSIVE_DARK_MODE`. The initial paint is taken from the
+  system `AppsUseLightTheme` registry value so `auto` mode doesn't flash
+  a light title bar while the WebView bridge comes online; subsequent
+  toggles (user theme button, system preference change) push through
+  the `set_titlebar_dark` bridge method. No-op on other platforms and
+  older Windows builds.
+- **mdvw version in the status bar.** The footer now ends with
+  `v{__version__}` so the running build is visible at a glance.
+
+### Docs
+- README refreshed to reflect the 0.6.x feature set (command palette,
+  workspace search, find-in-document, inspector, diagnostics, HTML
+  export, image paste, close-to-tray, single-instance handoff). The
+  "Security" section is collapsed into a short "Safety notes"
+  paragraph.
 
 
 ## [0.6.1] — 2026-04-17
