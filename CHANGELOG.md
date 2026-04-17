@@ -1,7 +1,7 @@
 # Changelog
 
 
-## [Unreleased]
+## [0.6.0] — 2026-04-17
 ### Features
 - **Workspace text search.** A new left-pane search section
   (Ctrl+Shift+F) scans every `.md`/`.markdown` file under the workspace
