@@ -876,14 +876,37 @@ kbd {
   #toolbar, #left-pane, #right-pane, #status-bar, #toast,
   .pane-resize-handle, #find-bar, #command-palette,
   .palette-backdrop { display: none !important; }
-  #main { display: block !important; }
-  #center { display: block !important; }
-  .split { display: block !important; }
+  /* The app CSS chains `html,body { height: 100% }` →
+     `#main { flex: 1; overflow: hidden }` → `#center { overflow: hidden }` →
+     `#preview { overflow: auto }` so the preview scrolls inside one
+     viewport. Printing that chain crops the output to the first page.
+     Release every height / overflow clamp so the content flows as one
+     long document the browser can paginate. */
+  html, body { height: auto !important; overflow: visible !important; }
+  body { display: block !important; background: white; color: black; }
+  #main {
+    display: block !important;
+    flex: none !important;
+    overflow: visible !important;
+    height: auto !important;
+  }
+  #center { display: block !important; overflow: visible !important; height: auto !important; }
+  .split { display: block !important; height: auto !important; }
   #editor, #gutter { display: none !important; }
   /* Source mode normally hides #preview (html[data-mode="source"] #preview),
      but print must always show the rendered preview — otherwise printing
      from source mode yields a blank page. */
   #preview,
-  html[data-mode="source"] #preview { display: block !important; padding: 0 !important; overflow: visible !important; }
-  body { background: white; color: black; }
+  html[data-mode="source"] #preview {
+    display: block !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+  }
+  /* Keep headings attached to their following paragraph, and don't split
+     atomic blocks (code, tables, figures) across pages when avoidable. */
+  h1, h2, h3, h4, h5, h6 { break-after: avoid; page-break-after: avoid; }
+  pre, table, figure, img { break-inside: avoid; page-break-inside: avoid; }
+  .md-frontmatter { break-after: avoid; page-break-after: avoid; }
 }

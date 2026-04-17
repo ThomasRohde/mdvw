@@ -84,6 +84,22 @@ def test_jsapi_render_markdown_shows_yaml_error():
     assert "still body" in html
 
 
+def test_parse_frontmatter_fields_is_json_serializable():
+    # PyYAML parses `date:` as `datetime.date`, which would break the
+    # pywebview bridge and silently leave the Inspector empty. The method
+    # must coerce non-JSON-native values so the result round-trips.
+    import json
+
+    api = app_mod.JsApi()
+    fields = api.parse_frontmatter_fields(
+        "---\ntitle: T\ndate: 2026-04-15\n---\nbody\n"
+    )
+    assert fields is not None
+    json.dumps(fields)  # must not raise
+    assert fields["title"] == "T"
+    assert fields["date"] == "2026-04-15"
+
+
 def test_save_file_roundtrips_frontmatter_verbatim(tmp_path):
     """Editing the body must not mangle the user's YAML whitespace/quoting."""
     api = app_mod.JsApi()
@@ -571,7 +587,8 @@ def test_export_html_preserves_existing_file_on_failure(tmp_path, monkeypatch):
 
     api = app_mod.JsApi()
     api._window = MagicMock()
-    api._window.create_file_dialog.return_value = str(existing)
+    # pywebview's winforms backend returns a 1-tuple from SAVE_DIALOG.
+    api._window.create_file_dialog.return_value = (str(existing),)
 
     # Simulate a crash at the atomic-swap step.
     def boom(src, dst):
@@ -590,11 +607,27 @@ def test_export_html_writes_when_target_is_new(tmp_path):
     api = app_mod.JsApi()
     api._window = MagicMock()
     target = tmp_path / "out.html"
-    api._window.create_file_dialog.return_value = str(target)
+    # pywebview's winforms backend returns a 1-tuple from SAVE_DIALOG; earlier
+    # tests mocked a bare string which hid the TypeError crash on real runs.
+    api._window.create_file_dialog.return_value = (str(target),)
 
     result = api.export_html("# hello\n")
     assert result == {"status": "ok", "path": str(target)}
     assert "<h1>hello</h1>" in target.read_text(encoding="utf-8")
+
+
+def test_export_html_accepts_bare_string_return(tmp_path):
+    """Some pywebview backends still hand back a bare string; the helper
+    must accept both shapes so backend drift doesn't silently break
+    export."""
+    api = app_mod.JsApi()
+    api._window = MagicMock()
+    target = tmp_path / "out.html"
+    api._window.create_file_dialog.return_value = str(target)
+
+    result = api.export_html("# hello\n")
+    assert result == {"status": "ok", "path": str(target)}
+    assert target.exists()
 
 
 def test_open_recent_loads_file_outside_browse_root(tmp_path, monkeypatch):

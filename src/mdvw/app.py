@@ -144,6 +144,23 @@ def _build_html(
     )
 
 
+def _save_dialog_path(result: object) -> str | None:
+    """Normalize the return of ``create_file_dialog(SAVE_DIALOG, ...)``.
+
+    pywebview 6.x on Windows (winforms backend) returns a 1-tuple
+    ``(path,)`` for save dialogs; older or other backends may return a
+    bare string. Both shapes land here. ``Path(tuple)`` would otherwise
+    raise ``TypeError`` and pywebview's bridge silently swallows the
+    exception, which is why export-HTML previously "failed silently".
+    """
+    if not result:
+        return None
+    if isinstance(result, str):
+        return result
+    # Sequence[str]
+    return result[0] if result else None
+
+
 def _atomic_write_text(path: Path, content: str) -> None:
     """Write `content` to `path` atomically. Preserves the original file on failure.
 
@@ -673,9 +690,10 @@ class JsApi:
             save_filename=f"{name}.html",
             file_types=("HTML (*.html)", "All files (*.*)"),
         )
-        if not result:
+        path_str = _save_dialog_path(result)
+        if path_str is None:
             return {"status": "cancelled"}
-        out_path = Path(result)
+        out_path = Path(path_str)
         title = self._current_path.name if self._current_path else "mdvw export"
         doc_dir = self._current_path.parent if self._current_path else None
         html = _build_standalone_html(content, doc_dir=doc_dir, title=title)
@@ -701,11 +719,18 @@ class JsApi:
         )
 
     def parse_frontmatter_fields(self, text: str) -> dict | None:
-        """Return parsed frontmatter as a dict, or None if absent/invalid."""
+        """Return parsed frontmatter as a dict, or None if absent/invalid.
+
+        PyYAML converts `date: 2026-04-15` into a `datetime.date` (and times
+        into `datetime.time`, etc.), which pywebview cannot JSON-serialize
+        across the bridge — the Inspector would silently go blank. Coerce
+        any non-JSON-native values to strings via `default=str` so the
+        result round-trips cleanly.
+        """
         meta, _body, err = parse_frontmatter(text)
         if err or meta is None:
             return None
-        return meta
+        return json.loads(json.dumps(meta, default=str))
 
     def _pick_save_path(self) -> Path | None:
         if self._window is None:
@@ -715,7 +740,8 @@ class JsApi:
             save_filename="untitled.md",
             file_types=("Markdown (*.md)", "All files (*.*)"),
         )
-        return Path(result) if result else None
+        path_str = _save_dialog_path(result)
+        return Path(path_str) if path_str else None
 
     def _load(self, path: Path, reason: str = "open") -> None:
         source = path.read_text(encoding="utf-8")
