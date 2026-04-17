@@ -11,6 +11,7 @@ dist/
 *.spec.bak
 .coverage
 htmlcov/
+*.stackdump
 
 # reference material (not part of the new package)
 MDLook.exe
