@@ -2,6 +2,30 @@
 
 
 ## [Unreleased]
+### Fixed
+- **Inspector frontmatter panel was blank for documents with date
+  fields.** PyYAML parses `date: 2026-04-15` into a `datetime.date`,
+  which pywebview's JS bridge cannot JSON-serialize — the call
+  resolved to nothing and the panel never rendered, while Document
+  Stats (pure JS off the source) populated fine and made the silent
+  failure easy to miss. `parse_frontmatter_fields` now coerces
+  non-JSON-native values to strings via `default=str`.
+- **Export HTML failed silently.** `create_file_dialog(SAVE_DIALOG)`
+  in pywebview 6.x on Windows (winforms backend) returns a 1-tuple
+  `(path,)`, not a bare string. `Path(result)` raised a `TypeError`
+  that pywebview swallowed, leaving the JS caller with `undefined`
+  and no flash. A shared `_save_dialog_path` helper now normalizes
+  both shapes (tuple and string), used by export HTML and the save-as
+  picker.
+- **Printing clipped the output to the first page.** The app's CSS
+  chains `height: 100%` / `overflow: hidden` from `html`/`body`
+  through `#main`/`#center`/`.split` down to `#preview`, so the
+  preview scrolls inside one viewport. The print stylesheet overrode
+  `display` but not those height/overflow clamps, so `window.print()`
+  saw a single-viewport canvas. Print now releases every constraint
+  in the chain and adds `break-after: avoid` on headings + the
+  frontmatter card and `break-inside: avoid` on `pre`/`table`/
+  `figure`/`img` for cleaner pagination.
 
 
 ## [0.6.0] — 2026-04-17
