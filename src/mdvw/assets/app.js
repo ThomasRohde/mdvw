@@ -170,16 +170,7 @@ async function renderMermaid(root) {
   }
 }
 
-function applyHljsTheme() {
-  const dark = html.dataset.resolvedTheme === 'dark';
-  const light = document.getElementById('hljs-theme-light');
-  const darkEl = document.getElementById('hljs-theme-dark');
-  if (light) light.disabled = dark;
-  if (darkEl) darkEl.disabled = !dark;
-}
-
 function highlightAndDecorate(root) {
-  applyHljsTheme();
   const blocks = root.querySelectorAll('pre.code-block > code[class*="language-"]');
   for (const code of blocks) {
     const pre = code.parentElement;
@@ -1465,7 +1456,6 @@ function resolveTheme() {
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
   resolveTheme();
   mermaidInited = false;
-  applyHljsTheme();
   if (currentMode !== 'source') rerender();
 });
 resolveTheme();

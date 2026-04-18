@@ -264,7 +264,7 @@ def build_standalone_html(
             f"<script>{_read_asset('vendor', 'katex', 'auto-render.min.js')}</script>"
         )
     if needs_hljs:
-        styles.append(f"<style>{_read_asset('vendor', 'hljs', 'github.min.css')}</style>")
+        styles.append(f"<style>{_read_asset('vendor', 'hljs', 'github-dark.min.css')}</style>")
         scripts.append(f"<script>{_read_asset('vendor', 'hljs', 'highlight.min.js')}</script>")
         for lang_path in _hljs_language_files(html_body):
             scripts.append(f"<script>{lang_path.read_text(encoding='utf-8')}</script>")

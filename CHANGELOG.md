@@ -2,6 +2,13 @@
 
 
 ## [Unreleased]
+### Fixed
+- **Syntax highlighting illegible in light mode.** Code-block chrome
+  (`--code-bg`) is always dark, but the hljs token stylesheet was swapped
+  with the app theme — so in light mode the GitHub-light palette rendered
+  dark tokens on a dark background. Pin the `github-dark` hljs stylesheet
+  in both the viewer and the HTML export; the light variant is no longer
+  referenced.
 
 
 ## [0.7.0] — 2026-04-18
