@@ -1,7 +1,7 @@
 # Changelog
 
 
-## [Unreleased]
+## [0.7.1] — 2026-04-18
 ### Fixed
 - **Syntax highlighting illegible in light mode.** Code-block chrome
   (`--code-bg`) is always dark, but the hljs token stylesheet was swapped
