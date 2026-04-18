@@ -1,6 +1,9 @@
 # Changelog
 
 
+## [Unreleased]
+
+
 ## [0.7.0] — 2026-04-18
 ### Added
 - **Open Directory command.** New **File → Open Directory…**
