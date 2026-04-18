@@ -1,6 +1,23 @@
 # Changelog
 
 
+## [Unreleased]
+### Added
+- **Open Directory command.** New **File → Open Directory…**
+  (`Ctrl+Shift+O`, toolbar button, `Open Directory` in the command
+  palette) lets you switch workspaces without relaunching from the CLI.
+  The picked folder becomes the sidebar root, `Ctrl+Shift+F` workspace
+  search and diagnostics see it immediately, and the choice is
+  persisted as `last_browse_root` so subsequent launches restore the
+  same workspace — helpful when opening mdvw via `.md` file
+  association from an unrelated working directory.
+
+### Changed
+- **Go to Heading is now `Ctrl+Shift+H`** (previously `Ctrl+Shift+O`,
+  now taken by Open Directory). The command palette entry still
+  accepts the `@` prefix for quick heading jumps.
+
+
 ## [0.6.2] — 2026-04-17
 ### Features
 - **Dark title bar in dark mode.** On Windows 10 1809+/11 the window

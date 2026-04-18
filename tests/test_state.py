@@ -68,6 +68,14 @@ def test_get_and_set_key(tmp_path, monkeypatch):
     assert state.get("mode") == "source"
 
 
+def test_last_browse_root_round_trip(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    assert state.get("last_browse_root") is None
+    workspace = str(tmp_path / "workspace")
+    state.set_key("last_browse_root", workspace)
+    assert state.get("last_browse_root") == workspace
+
+
 def test_add_recent_prepends_and_deduplicates(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path))
     state.add_recent("/a/b.md")

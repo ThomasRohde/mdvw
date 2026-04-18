@@ -462,6 +462,36 @@ class JsApi:
         self._load(Path(result[0]))
         return True
 
+    def open_directory(self) -> bool:
+        """Pick a workspace root via the native folder dialog.
+
+        Sets ``self._browse_root`` to the chosen directory, persists it as
+        ``state["last_browse_root"]`` so the next launch restores the same
+        workspace, and notifies the frontend so the sidebar / workspace
+        search / diagnostics see the new root immediately.
+
+        The current document is untouched (no ``_load`` call, no change to
+        ``_current_path`` / ``_loaded_fingerprint`` / ``_dirty``), so there
+        is no unsaved-edits risk to guard against.
+        """
+        if self._window is None:
+            return False
+        result = self._window.create_file_dialog(webview.FOLDER_DIALOG)
+        picked = _save_dialog_path(result)
+        if picked is None:
+            return False
+        try:
+            new_root = Path(picked).resolve()
+        except OSError:
+            return False
+        if not new_root.is_dir():
+            return False
+        self._browse_root = new_root
+        state.set_key("last_browse_root", str(new_root))
+        payload = _json_for_script_tag({"path": str(new_root)})
+        self._window.evaluate_js(f"window.mdvwBrowseRootChanged({payload})")
+        return True
+
     def open_recent(self, path_str: str) -> bool:
         """Load a markdown file from the persisted recent-files list.
 
@@ -975,10 +1005,23 @@ def run(file: Path | None, edit: bool, tray: bool) -> int:
 
     _set_app_user_model_id()
     browse_root: Path | None = None
-    try:
-        browse_root = Path.cwd().resolve()
-    except OSError:
-        browse_root = None
+    # Prefer a previously-picked workspace root so double-click launches
+    # (where cwd is typically %USERPROFILE% or the association handler's
+    # dir) still get a useful sidebar. Fall back to cwd when no persisted
+    # root is available or the stored path no longer resolves.
+    persisted_root = state.get("last_browse_root")
+    if isinstance(persisted_root, str) and persisted_root:
+        try:
+            candidate_root = Path(persisted_root).resolve()
+        except OSError:
+            candidate_root = None
+        if candidate_root is not None and candidate_root.is_dir():
+            browse_root = candidate_root
+    if browse_root is None:
+        try:
+            browse_root = Path.cwd().resolve()
+        except OSError:
+            browse_root = None
     # Reopen last file if none was provided on the command line — but only
     # when it belongs to the workspace we were just launched in. Otherwise
     # a `mdvw` in a different project silently reopens an unrelated

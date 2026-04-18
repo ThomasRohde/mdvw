@@ -193,6 +193,86 @@ def test_open_file_without_window_returns_false():
     assert api.open_file() is False
 
 
+def test_open_directory_without_window_returns_false():
+    api = app_mod.JsApi()
+    assert api.open_directory() is False
+
+
+def test_open_directory_happy_path(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    api = app_mod.JsApi()
+    api._window = MagicMock()
+    api._window.create_file_dialog.return_value = (str(workspace),)
+
+    assert api.open_directory() is True
+    assert api._browse_root == workspace.resolve()
+
+    from mdvw import state
+    assert state.get("last_browse_root") == str(workspace.resolve())
+
+    call = api._window.evaluate_js.call_args[0][0]
+    assert "mdvwBrowseRootChanged" in call
+    # The path is embedded via ``_json_for_script_tag`` which escapes
+    # backslashes; compare against the JSON-encoded form.
+    import json
+    assert json.dumps(str(workspace.resolve()))[1:-1] in call
+
+
+def test_open_directory_accepts_bare_string_return(tmp_path, monkeypatch):
+    """Backend drift: some pywebview builds return a bare string instead of
+    the winforms 1-tuple. ``_save_dialog_path`` normalizes both shapes."""
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    api = app_mod.JsApi()
+    api._window = MagicMock()
+    api._window.create_file_dialog.return_value = str(workspace)
+
+    assert api.open_directory() is True
+    assert api._browse_root == workspace.resolve()
+
+
+def test_open_directory_user_cancels_leaves_state_untouched(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    original_root = tmp_path / "original"
+    original_root.mkdir()
+
+    api = app_mod.JsApi()
+    api._browse_root = original_root
+    api._window = MagicMock()
+    # Cancelled dialog: empty tuple on winforms, None on others.
+    api._window.create_file_dialog.return_value = ()
+
+    assert api.open_directory() is False
+    assert api._browse_root == original_root
+    assert api._window.evaluate_js.call_count == 0
+
+    from mdvw import state
+    assert state.get("last_browse_root") is None
+
+
+def test_open_directory_rejects_nonexistent_path(tmp_path, monkeypatch):
+    """Defense-in-depth: if the dialog returns a path that no longer
+    resolves to a directory, don't mutate the workspace root."""
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    original_root = tmp_path / "original"
+    original_root.mkdir()
+    bogus = tmp_path / "does-not-exist"
+
+    api = app_mod.JsApi()
+    api._browse_root = original_root
+    api._window = MagicMock()
+    api._window.create_file_dialog.return_value = (str(bogus),)
+
+    assert api.open_directory() is False
+    assert api._browse_root == original_root
+    assert api._window.evaluate_js.call_count == 0
+
+
 def test_load_emits_reason_in_payload(tmp_path):
     """External reloads must tag the payload so JS can prompt on dirty edits."""
     api = app_mod.JsApi()

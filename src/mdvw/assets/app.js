@@ -20,7 +20,7 @@ const bootstrapEl = (id) =>
 const mdSource = JSON.parse(bootstrapEl('md-source').textContent || '""');
 const mdPath = bootstrapEl('md-path').textContent.trim();
 const startMode = (bootstrapEl('md-start-mode').textContent.trim() || 'read');
-const browseRoot = (bootstrapEl('md-browse-root')?.textContent || '').trim();
+let browseRoot = (bootstrapEl('md-browse-root')?.textContent || '').trim();
 const uiState = JSON.parse(bootstrapEl('md-ui-state')?.textContent || '{}');
 
 const getApi = () => (window.pywebview && window.pywebview.api) || null;
@@ -76,7 +76,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 's') { e.preventDefault(); save(); return; }
-  if ((e.ctrlKey || e.metaKey) && e.key === 'o') {
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'o') {
     e.preventDefault();
     openFile();
     return;
@@ -93,6 +93,11 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'o' || e.key === 'O') && !e.altKey) {
+    e.preventDefault();
+    openDirectory();
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'h' || e.key === 'H') && !e.altKey) {
     e.preventDefault();
     openPalette('heading');
     return;
@@ -624,6 +629,7 @@ registerCommand('mode.read', 'Read Mode', 'Ctrl+1', () => setMode('read'));
 registerCommand('mode.edit', 'Edit Mode', 'Ctrl+2', () => setMode('edit'));
 registerCommand('mode.source', 'Source Mode', 'Ctrl+3', () => setMode('source'));
 registerCommand('file.open', 'Open File', 'Ctrl+O', () => openFile());
+registerCommand('file.open_dir', 'Open Directory', 'Ctrl+Shift+O', () => openDirectory());
 registerCommand('file.save', 'Save', 'Ctrl+S', () => save());
 registerCommand('pane.files', 'Show Files', '', () => { loadBrowser(); showLeftSection('files'); });
 registerCommand('pane.outline', 'Show Outline', '', () => showLeftSection('outline'));
@@ -639,7 +645,7 @@ registerCommand('view.theme', 'Cycle Theme', '', () => {
   flash(`Theme: ${next}`);
   if (currentMode !== 'source') rerender();
 });
-registerCommand('navigate.heading', 'Go to Heading', 'Ctrl+Shift+O', () => openPalette('heading'));
+registerCommand('navigate.heading', 'Go to Heading', 'Ctrl+Shift+H', () => openPalette('heading'));
 registerCommand('help', 'Keyboard Shortcuts', '', () => helpDialog.showModal());
 
 // ---------- Inspector ----------
@@ -1508,8 +1514,35 @@ async function openFile() {
   const api = getApi();
   if (api && api.open_file) await api.open_file();
 }
+async function openDirectory() {
+  // Switching workspaces only updates _browse_root / refreshes the
+  // sidebar; the current document and its dirty state are preserved,
+  // so no confirmDiscardIfDirty() gate is needed here.
+  const api = getApi();
+  if (api && api.open_directory) await api.open_directory();
+}
 document.getElementById('btn-open').addEventListener('click', openFile);
+document.getElementById('btn-open-dir').addEventListener('click', openDirectory);
 document.getElementById('btn-save').addEventListener('click', () => save());
+
+// Invoked from Python after open_directory() sets a new workspace root.
+// Keeps the frontend state (browseRoot + sidebar cache) in sync with
+// self._browse_root so the Files pane, workspace search gating, and
+// palette file-search all see the new root without a page reload.
+window.mdvwBrowseRootChanged = (payload) => {
+  const newRoot = (payload && typeof payload.path === 'string') ? payload.path : '';
+  if (!newRoot) return;
+  browseRoot = newRoot;
+  browserLoaded = false;
+  browserNav.innerHTML = '';
+  // If the Files pane is visible, refresh it immediately; otherwise leave
+  // the lazy reload to the next Files-button click.
+  const onFiles = (leftPaneSection === 'files') && !leftPaneCollapsed;
+  if (onFiles) {
+    loadBrowser();
+  }
+  flash(`Workspace: ${newRoot}`);
+};
 const btnWidth = document.getElementById('btn-width');
 function updateWidthIcon() {
   const narrow = preview.classList.contains('narrow');
