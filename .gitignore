@@ -22,3 +22,4 @@ htmlcov/
 # reference material (not part of the new package)
 MDLook.exe
 _internal/
+.codex-tmp
