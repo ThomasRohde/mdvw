@@ -1,7 +1,7 @@
 # Changelog
 
 
-## [Unreleased]
+## [0.8.0] — 2026-04-18
 ### Added
 - **Wiki links.** `[[Note]]`, `[[Note|alias]]`, `[[Note#Heading]]`, and
   bare `[[#Heading]]` now resolve against the workspace. Clicking an
