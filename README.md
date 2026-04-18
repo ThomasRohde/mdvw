@@ -30,6 +30,7 @@ Most Markdown viewers either need a browser tab, a heavy IDE, or pull fonts and 
 - **Three modes** — Read, Edit (live split), Source (raw `.md` in a dark editor). Switch with `Ctrl+1/2/3` or cycle with `E`.
 - **Offline first** — KaTeX (math), Mermaid (diagrams), highlight.js (20 languages), and webfonts all ship inside the wheel, SHA256-pinned via a manifest.
 - **GFM + extensions** — tables, task lists, footnotes, strikethrough. Plus `==highlight==`, `++underline++`, and `{color:red}…{/color}` / `{color:#hex}…{/color}`.
+- **Wiki links** — `[[Note]]`, `[[Note|alias]]`, `[[Note#Heading]]`, `[[#Heading]]`. Click to navigate, type `[[` for filename autocomplete, click an unresolved link to create the note. Backlinks live in the **Incoming** sidebar pane; Diagnostics flags ambiguous and missing-heading targets.
 - **YAML frontmatter card** — `---`-fenced metadata renders as a styled card at the top of the preview; invalid YAML shows an error card without breaking the body.
 - **Live reload** — external changes on disk re-render instantly; unsaved edits get a conflict prompt rather than being silently overwritten.
 - **Command palette** — `Ctrl+P` blends slash-commands with filename matches from the workspace into one fuzzy-searchable input.
@@ -72,7 +73,10 @@ mdvw --unregister          # remove the association
 | `Ctrl+S` | Save (atomic; prompts on disk conflict) |
 | `Ctrl+F` | Find in document |
 | `Ctrl+Shift+F` | Search workspace |
-| `Ctrl+Shift+O` | Go to heading |
+| `Ctrl+Shift+H` | Go to heading |
+| `Ctrl+Shift+O` | Open directory |
+| `Alt+Left` / `Alt+Right` | Back / Forward through visited documents |
+| `[[` | Wiki-link filename autocomplete (in Edit / Source) |
 | `Ctrl+Shift+W` | Toggle narrow / wide preview |
 | `Ctrl+Alt+I` | Toggle inspector |
 
@@ -84,6 +88,8 @@ Beyond GitHub Flavored Markdown, `mdvw` understands:
 ==highlighted== text
 ++underlined++ text
 {color:orange}orange{/color}, {color:#bf3989}pink{/color}
+
+[[Note]], [[Note|alias text]], [[Note#Heading]], [[#Same-doc heading]]
 ```
 
 Inline math `$e^{i\pi}+1=0$` and block math:

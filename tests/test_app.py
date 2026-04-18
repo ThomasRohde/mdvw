@@ -105,7 +105,11 @@ def test_save_file_roundtrips_frontmatter_verbatim(tmp_path):
     api = app_mod.JsApi()
     api._current_path = tmp_path / "doc.md"
     source = "---\ntitle:   Hi   \ntags:\n  - one\n  - two\n---\n# Body\n"
-    assert api.save_file(source) == {"status": "ok"}
+    result = api.save_file(source)
+    assert result["status"] == "ok"
+    assert result["path"] == str(tmp_path / "doc.md")
+    assert result["name"] == "doc.md"
+    assert result["new_file"] is False
     assert (tmp_path / "doc.md").read_text(encoding="utf-8") == source
 
 
@@ -116,11 +120,38 @@ def test_save_file_without_window_returns_cancelled():
     assert api.save_file("anything") == {"status": "cancelled"}
 
 
+def test_save_file_new_document_returns_saved_path(tmp_path, monkeypatch):
+    from mdvw import state
+
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    api = app_mod.JsApi()
+    target = tmp_path / "New Note.md"
+    api._window = MagicMock()
+    api._window.create_file_dialog.return_value = (str(target),)
+
+    result = api.save_file("# New Note\n")
+
+    assert result == {
+        "status": "ok",
+        "path": str(target),
+        "name": "New Note.md",
+        "new_file": True,
+    }
+    assert target.read_text(encoding="utf-8") == "# New Note\n"
+    assert api._current_path == target
+    assert state.get("recent_files") == [str(target)]
+    assert state.get("last_file") == str(target)
+
+
 def test_save_file_writes_when_current_path_set(tmp_path):
     api = app_mod.JsApi()
     api._current_path = tmp_path / "out.md"
     # Brand-new file → no prior fingerprint → no conflict guard.
-    assert api.save_file("hello") == {"status": "ok"}
+    result = api.save_file("hello")
+    assert result["status"] == "ok"
+    assert result["path"] == str(tmp_path / "out.md")
+    assert result["name"] == "out.md"
+    assert result["new_file"] is False
     assert (tmp_path / "out.md").read_text(encoding="utf-8") == "hello"
 
 
@@ -156,7 +187,8 @@ def test_save_conflict_force_overwrites(tmp_path):
     p.write_text("external changes\n", encoding="utf-8")
 
     result = api.save_file("my edits", force=True)
-    assert result == {"status": "ok"}
+    assert result["status"] == "ok"
+    assert result["path"] == str(p)
     assert p.read_text(encoding="utf-8") == "my edits"
     # Fingerprint must be refreshed so the next save sees *this* as baseline.
     assert api._loaded_fingerprint == app_mod._fingerprint(p)
@@ -658,6 +690,77 @@ def test_open_path_loads_valid_in_root_file(tmp_path):
     call = api._window.evaluate_js.call_args[0][0]
     assert '"reason": "open"' in call
     assert '"name": "doc.md"' in call
+
+
+def test_jsapi_resolve_wiki_link(tmp_path):
+    index = tmp_path / "Index.md"
+    note = tmp_path / "Note.md"
+    index.write_text("[[Note#Details]]", encoding="utf-8")
+    note.write_text("# Note\n## Details\n", encoding="utf-8")
+
+    api = app_mod.JsApi()
+    api._browse_root = tmp_path
+    api._current_path = index
+
+    result = api.resolve_wiki_link("Note#Details")
+
+    assert result["status"] == "ok"
+    assert result["path"] == str(note.resolve())
+    assert result["heading"] == "Details"
+
+
+def test_jsapi_incoming_links(tmp_path):
+    target = tmp_path / "Target.md"
+    source = tmp_path / "Source.md"
+    target.write_text("# Target\n", encoding="utf-8")
+    source.write_text("[[Target]]", encoding="utf-8")
+
+    api = app_mod.JsApi()
+    api._browse_root = tmp_path
+    api._current_path = target
+
+    incoming = api.get_incoming_links()
+
+    assert len(incoming) == 1
+    assert incoming[0]["source_path"] == str(source.resolve())
+    assert incoming[0]["raw"] == "Target"
+
+
+def test_jsapi_create_wiki_note_current_folder(tmp_path):
+    current = tmp_path / "notes" / "Index.md"
+    current.parent.mkdir()
+    current.write_text("[[New Note]]", encoding="utf-8")
+
+    api = app_mod.JsApi()
+    api._browse_root = tmp_path
+    api._current_path = current
+    api._window = MagicMock()
+
+    result = api.create_wiki_note("New Note")
+
+    created = tmp_path / "notes" / "New Note.md"
+    assert result["status"] == "created"
+    assert result["path"] == str(created.resolve())
+    assert result["name"] == "New Note.md"
+    assert result["new_file"] is True
+    assert created.is_file()
+    assert api._current_path == created.resolve()
+
+
+def test_jsapi_create_wiki_note_sanitizes_traversal(tmp_path):
+    current = tmp_path / "Index.md"
+    current.write_text("", encoding="utf-8")
+
+    api = app_mod.JsApi()
+    api._browse_root = tmp_path
+    api._current_path = current
+    api._window = MagicMock()
+
+    result = api.create_wiki_note("../../Secret")
+
+    assert result["status"] == "created"
+    assert (tmp_path / "Secret.md").is_file()
+    assert not (tmp_path.parent / "Secret.md").exists()
 
 
 def test_export_html_preserves_existing_file_on_failure(tmp_path, monkeypatch):

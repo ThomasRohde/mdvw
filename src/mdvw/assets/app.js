@@ -5,6 +5,8 @@ const preview = document.getElementById('preview');
 const editor = document.getElementById('editor');
 const toast = document.getElementById('toast');
 const fileChip = document.getElementById('file-chip');
+const btnBack = document.getElementById('btn-back');
+const btnForward = document.getElementById('btn-forward');
 const assocDialog = document.getElementById('assoc-prompt');
 const helpDialog = document.getElementById('help-dialog');
 const segs = document.querySelectorAll('.segmented .seg');
@@ -19,6 +21,7 @@ const bootstrapEl = (id) =>
 
 const mdSource = JSON.parse(bootstrapEl('md-source').textContent || '""');
 const mdPath = bootstrapEl('md-path').textContent.trim();
+let currentPath = mdPath;
 const startMode = (bootstrapEl('md-start-mode').textContent.trim() || 'read');
 let browseRoot = (bootstrapEl('md-browse-root')?.textContent || '').trim();
 const uiState = JSON.parse(bootstrapEl('md-ui-state')?.textContent || '{}');
@@ -28,6 +31,107 @@ const getApi = () => (window.pywebview && window.pywebview.api) || null;
 let currentSource = mdSource;
 let currentMode = 'read';
 let dirty = false;
+
+// ---------- Document navigation history ----------
+
+const navigationHistory = [];
+let navigationIndex = -1;
+let pendingHistoryTraversal = null;
+let navigationBusy = false;
+
+function navigationEntry(path, name = '') {
+  if (!path) return null;
+  const fallback = String(path).split(/[\\/]/).filter(Boolean).pop() || String(path);
+  return { path: String(path), name: name || fallback };
+}
+
+function updateNavigationControls() {
+  const back = navigationHistory[navigationIndex - 1] || null;
+  const forward = navigationHistory[navigationIndex + 1] || null;
+  btnBack.disabled = !back || navigationBusy;
+  btnForward.disabled = !forward || navigationBusy;
+  btnBack.title = back ? `Back to ${back.name} (Alt+Left)` : 'Back (Alt+Left)';
+  btnForward.title = forward ? `Forward to ${forward.name} (Alt+Right)` : 'Forward (Alt+Right)';
+}
+
+function recordDocumentNavigation(path, name = '', reason = 'open') {
+  const entry = navigationEntry(path, name);
+  if (!entry) { updateNavigationControls(); return; }
+
+  if (pendingHistoryTraversal && sameBrowserPath(entry.path, pendingHistoryTraversal.path)) {
+    navigationHistory[pendingHistoryTraversal.index] = entry;
+    navigationIndex = pendingHistoryTraversal.index;
+    pendingHistoryTraversal = null;
+    updateNavigationControls();
+    return;
+  }
+  if (pendingHistoryTraversal) pendingHistoryTraversal = null;
+
+  if (reason === 'watch') {
+    if (navigationIndex >= 0) navigationHistory[navigationIndex] = entry;
+    else {
+      navigationHistory.push(entry);
+      navigationIndex = 0;
+    }
+    updateNavigationControls();
+    return;
+  }
+
+  const current = navigationHistory[navigationIndex] || null;
+  if (current && sameBrowserPath(current.path, entry.path)) {
+    navigationHistory[navigationIndex] = entry;
+    updateNavigationControls();
+    return;
+  }
+
+  navigationHistory.splice(navigationIndex + 1);
+  navigationHistory.push(entry);
+  if (navigationHistory.length > 100) navigationHistory.shift();
+  navigationIndex = navigationHistory.length - 1;
+  updateNavigationControls();
+}
+
+async function openHistoryPath(path) {
+  const api = await whenApiReady();
+  if (!api) return false;
+  if (api.open_path) {
+    try {
+      if (await api.open_path(path)) return true;
+    } catch { /* fall back to recent-file allowlist */ }
+  }
+  if (api.open_recent) {
+    try {
+      return !!(await api.open_recent(path));
+    } catch { return false; }
+  }
+  return false;
+}
+
+async function navigateHistory(delta) {
+  if (navigationBusy) return;
+  const targetIndex = navigationIndex + delta;
+  const target = navigationHistory[targetIndex];
+  if (!target) return;
+  if (!(await confirmDiscardIfDirty())) return;
+
+  const previousIndex = navigationIndex;
+  pendingHistoryTraversal = { index: targetIndex, path: target.path };
+  navigationIndex = targetIndex;
+  navigationBusy = true;
+  updateNavigationControls();
+  const ok = await openHistoryPath(target.path);
+  navigationBusy = false;
+  if (!ok) {
+    pendingHistoryTraversal = null;
+    navigationIndex = previousIndex;
+    updateNavigationControls();
+    flash(`Could not open ${target.name}`);
+    return;
+  }
+  updateNavigationControls();
+}
+
+recordDocumentNavigation(mdPath, fileChip.textContent || mdPath, 'initial');
 
 // ---------- Mode switching ----------
 
@@ -65,6 +169,16 @@ segs.forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && paletteOpen) { closePalette(); e.preventDefault(); return; }
   const typing = document.activeElement && (document.activeElement.tagName === 'TEXTAREA' || document.activeElement.tagName === 'INPUT');
+  if (!typing && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key === 'ArrowLeft') {
+    e.preventDefault();
+    navigateHistory(-1);
+    return;
+  }
+  if (!typing && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key === 'ArrowRight') {
+    e.preventDefault();
+    navigateHistory(1);
+    return;
+  }
   if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
     e.preventDefault();
     if (paletteOpen) closePalette(); else openPalette();
@@ -222,6 +336,7 @@ const rightPane = document.getElementById('right-pane');
 const paneTabs = leftPane.querySelectorAll('.pane-tab');
 const paneSections = leftPane.querySelectorAll('.pane-section');
 let sessionsLoaded = false;
+let incomingLoaded = false;
 let leftPaneCollapsed = uiState.left_pane_collapsed ?? false;
 let leftPaneWidth = uiState.left_pane_width ?? 280;
 let leftPaneSection = uiState.left_pane_section ?? 'files';
@@ -265,6 +380,7 @@ function showLeftSection(name) {
   persistState();
   // Lazy-load section data
   if (name === 'sessions' && !sessionsLoaded) loadSessions();
+  if (name === 'incoming' && !incomingLoaded) loadIncomingLinks();
   if (name === 'files' && !browserLoaded && browseRoot) loadBrowser();
 }
 
@@ -622,6 +738,8 @@ registerCommand('mode.source', 'Source Mode', 'Ctrl+3', () => setMode('source'))
 registerCommand('file.open', 'Open File', 'Ctrl+O', () => openFile());
 registerCommand('file.open_dir', 'Open Directory', 'Ctrl+Shift+O', () => openDirectory());
 registerCommand('file.save', 'Save', 'Ctrl+S', () => save());
+registerCommand('navigate.back', 'Back', 'Alt+Left', () => navigateHistory(-1));
+registerCommand('navigate.forward', 'Forward', 'Alt+Right', () => navigateHistory(1));
 registerCommand('pane.files', 'Show Files', '', () => { loadBrowser(); showLeftSection('files'); });
 registerCommand('pane.outline', 'Show Outline', '', () => showLeftSection('outline'));
 registerCommand('pane.toggle_left', 'Toggle Left Pane', '', () => toggleLeftPane());
@@ -1072,6 +1190,64 @@ const browserNav = document.getElementById('browser-nav');
 const btnFiles = document.getElementById('btn-files');
 let browserLoaded = false;
 
+function normalizeBrowserPath(path) {
+  let out = String(path || '').replace(/\\/g, '/').replace(/\/+$/, '');
+  if (/^[a-z]:/i.test(out)) out = out.toLowerCase();
+  return out;
+}
+
+function sameBrowserPath(a, b) {
+  return !!a && !!b && normalizeBrowserPath(a) === normalizeBrowserPath(b);
+}
+
+function browserPathContains(dir, path) {
+  const base = normalizeBrowserPath(dir);
+  const target = normalizeBrowserPath(path);
+  return !!base && !!target && target !== base && target.startsWith(`${base}/`);
+}
+
+function setActiveBrowserPath(path) {
+  if (!path) return;
+  browserNav.querySelectorAll('.file-link.active').forEach(b => b.classList.remove('active'));
+  const btn = Array.from(browserNav.querySelectorAll('.file-link'))
+    .find(item => sameBrowserPath(item.dataset.path, path));
+  if (btn) {
+    btn.classList.add('active');
+    btn.scrollIntoView({ block: 'nearest' });
+  }
+}
+
+async function revealBrowserPath(path) {
+  if (!path) return;
+  for (let i = 0; i < 20; i += 1) {
+    const visibleFile = Array.from(browserNav.querySelectorAll('.file-link'))
+      .find(btn => sameBrowserPath(btn.dataset.path, path));
+    if (visibleFile) {
+      setActiveBrowserPath(path);
+      return;
+    }
+    const nextDir = Array.from(browserNav.querySelectorAll('details[data-path]'))
+      .filter(details => browserPathContains(details.dataset.path, path))
+      .sort((a, b) => normalizeBrowserPath(a.dataset.path).length - normalizeBrowserPath(b.dataset.path).length)
+      .find(details => !details.open || !details.dataset.loaded);
+    if (!nextDir) return;
+    if (!nextDir.dataset.loaded) await loadDir(nextDir);
+    nextDir.open = true;
+  }
+}
+
+async function refreshBrowserIfVisible(targetPath = '') {
+  browserLoaded = false;
+  browserNav.innerHTML = '';
+  if (leftPaneSection !== 'files' || leftPaneCollapsed || !browseRoot) return;
+  try {
+    await loadBrowser();
+    await revealBrowserPath(targetPath || currentPath);
+  } catch {
+    browserLoaded = false;
+  }
+}
+
 function renderEntries(entries, parent) {
   if (!Array.isArray(entries) || entries.length === 0) {
     const empty = document.createElement('div');
@@ -1101,6 +1277,7 @@ function renderEntries(entries, parent) {
       btn.dataset.path = e.path;
       btn.textContent = e.name;
       btn.title = e.path;
+      if (sameBrowserPath(e.path, currentPath)) btn.classList.add('active');
       li.appendChild(btn);
     }
     ul.appendChild(li);
@@ -1363,6 +1540,73 @@ wsSearchInput.addEventListener('keydown', (e) => {
 
 registerCommand('search.workspace', 'Search Workspace', 'Ctrl+Shift+F', () => openWorkspaceSearch());
 
+// ---------- Incoming links ----------
+
+const incomingList = document.getElementById('incoming-list');
+
+async function loadIncomingLinks() {
+  const api = await whenApiReady();
+  incomingList.innerHTML = '';
+  if (!api || !api.get_incoming_links || !currentPath) {
+    incomingList.innerHTML = '<div class="incoming-empty">No current note</div>';
+    incomingLoaded = true;
+    return;
+  }
+  const links = await api.get_incoming_links(currentPath);
+  if (!links || !links.length) {
+    incomingList.innerHTML = '<div class="incoming-empty">No incoming links</div>';
+    incomingLoaded = true;
+    return;
+  }
+  for (const link of links) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'incoming-item';
+    btn.dataset.path = link.source_path;
+    btn.dataset.raw = link.raw;
+    btn.title = link.source_path;
+
+    const source = document.createElement('span');
+    source.className = 'incoming-source';
+    const line = document.createElement('span');
+    line.className = 'incoming-line';
+    line.textContent = `L${link.line}`;
+    source.appendChild(line);
+    source.appendChild(document.createTextNode(link.source_relative));
+
+    const ctx = document.createElement('span');
+    ctx.className = 'incoming-context';
+    ctx.textContent = link.context || link.display || link.raw;
+
+    btn.appendChild(source);
+    btn.appendChild(ctx);
+    incomingList.appendChild(btn);
+  }
+  incomingLoaded = true;
+}
+
+incomingList.addEventListener('click', async (e) => {
+  const btn = e.target && e.target.closest ? e.target.closest('.incoming-item') : null;
+  if (!btn) return;
+  const path = btn.dataset.path;
+  if (!path) return;
+  if (!(await confirmDiscardIfDirty())) return;
+  const api = getApi();
+  if (!api || !api.open_path) return;
+  pendingHighlight = { path, query: `[[${btn.dataset.raw || ''}]]`, caseSensitive: true };
+  const ok = await api.open_path(path);
+  if (!ok) {
+    pendingHighlight = null;
+    flash('Could not open file');
+  }
+});
+
+registerCommand('pane.incoming', 'Show Incoming Links', '', () => {
+  incomingLoaded = false;
+  loadIncomingLinks();
+  showLeftSection('incoming');
+});
+
 // ---------- Sessions / Recent files ----------
 
 const recentList = document.getElementById('recent-list');
@@ -1514,6 +1758,8 @@ async function openDirectory() {
 document.getElementById('btn-open').addEventListener('click', openFile);
 document.getElementById('btn-open-dir').addEventListener('click', openDirectory);
 document.getElementById('btn-save').addEventListener('click', () => save());
+btnBack.addEventListener('click', () => navigateHistory(-1));
+btnForward.addEventListener('click', () => navigateHistory(1));
 
 // Invoked from Python after open_directory() sets a new workspace root.
 // Keeps the frontend state (browseRoot + sidebar cache) in sync with
@@ -1523,14 +1769,10 @@ window.mdvwBrowseRootChanged = (payload) => {
   const newRoot = (payload && typeof payload.path === 'string') ? payload.path : '';
   if (!newRoot) return;
   browseRoot = newRoot;
-  browserLoaded = false;
-  browserNav.innerHTML = '';
+  incomingLoaded = false;
   // If the Files pane is visible, refresh it immediately; otherwise leave
   // the lazy reload to the next Files-button click.
-  const onFiles = (leftPaneSection === 'files') && !leftPaneCollapsed;
-  if (onFiles) {
-    loadBrowser();
-  }
+  refreshBrowserIfVisible();
   flash(`Workspace: ${newRoot}`);
 };
 const btnWidth = document.getElementById('btn-width');
@@ -1561,9 +1803,19 @@ async function save() {
   }
   if (result && result.status === 'ok') {
     currentSource = content;
+    if (result.path) {
+      currentPath = result.path;
+      fileChip.textContent = result.path;
+      fileChip.title = result.path;
+    }
+    if (result.name) document.title = `${result.name} — mdvw`;
+    recordDocumentNavigation(currentPath, result.name || fileChip.textContent || currentPath, 'save');
     setDirty(false);
+    incomingLoaded = false;
+    await refreshBrowserIfVisible(result.path || currentPath);
     flash('Saved');
     if (currentMode === 'read') await rerender();
+    if (leftPaneSection === 'incoming' && !leftPaneCollapsed) loadIncomingLinks();
     return;
   }
   if (result && result.status === 'error') {
@@ -1596,7 +1848,173 @@ editor.addEventListener('input', () => {
     clearTimeout(renderDebounce);
     renderDebounce = setTimeout(() => rerender(), 120);
   }
+  scheduleWikiCompletion();
 });
+
+// ---------- Wiki-link autocomplete ----------
+
+const wikiComplete = document.getElementById('wiki-complete');
+let wikiCompleteOpen = false;
+let wikiCompleteItems = [];
+let wikiCompleteActive = 0;
+let wikiCompleteRange = null;
+let wikiCompleteTimer = 0;
+let wikiCompleteRequest = 0;
+
+function getWikiCompletionContext() {
+  if (currentMode !== 'edit' && currentMode !== 'source') return null;
+  if (editor.selectionStart !== editor.selectionEnd) return null;
+  const pos = editor.selectionStart;
+  const before = editor.value.slice(0, pos);
+  const open = before.lastIndexOf('[[');
+  if (open < 0) return null;
+  const close = before.lastIndexOf(']]');
+  if (close > open) return null;
+  const query = before.slice(open + 2);
+  if (query.includes('\n') || query.includes(']') || query.startsWith('!')) return null;
+  if (query.includes('|')) return null;
+  return { start: open + 2, end: pos, query };
+}
+
+function scheduleWikiCompletion() {
+  clearTimeout(wikiCompleteTimer);
+  const ctx = getWikiCompletionContext();
+  if (!ctx) { closeWikiCompletion(); return; }
+  wikiCompleteTimer = setTimeout(() => updateWikiCompletion(ctx), 120);
+}
+
+async function updateWikiCompletion(ctx) {
+  const api = getApi();
+  if (!api || !api.search_wiki_targets) { closeWikiCompletion(); return; }
+  const request = ++wikiCompleteRequest;
+  const items = await api.search_wiki_targets(ctx.query, currentPath);
+  if (request !== wikiCompleteRequest) return;
+  if (!items || !items.length) { closeWikiCompletion(); return; }
+  wikiCompleteRange = ctx;
+  wikiCompleteItems = items;
+  wikiCompleteActive = 0;
+  renderWikiCompletion();
+}
+
+function renderWikiCompletion() {
+  wikiComplete.innerHTML = '';
+  wikiComplete.hidden = false;
+  wikiCompleteOpen = true;
+  positionWikiCompletion();
+  wikiCompleteItems.forEach((item, i) => {
+    const div = document.createElement('div');
+    div.className = 'wiki-complete-item' + (i === wikiCompleteActive ? ' active' : '');
+    const label = document.createElement('span');
+    label.className = 'wiki-complete-label';
+    label.textContent = item.type === 'heading' ? `# ${item.label}` : item.label;
+    const detail = document.createElement('span');
+    detail.className = 'wiki-complete-detail';
+    detail.textContent = item.detail || item.insert || '';
+    div.appendChild(label);
+    div.appendChild(detail);
+    div.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      acceptWikiCompletion(i);
+    });
+    wikiComplete.appendChild(div);
+  });
+}
+
+function positionWikiCompletion() {
+  const rect = getTextareaCaretRect(editor);
+  wikiComplete.style.left = `${Math.min(rect.left, window.innerWidth - 340)}px`;
+  wikiComplete.style.top = `${Math.min(rect.bottom + 4, window.innerHeight - 280)}px`;
+}
+
+function updateWikiCompletionActive() {
+  wikiComplete.querySelectorAll('.wiki-complete-item').forEach((el, i) => {
+    const on = i === wikiCompleteActive;
+    el.classList.toggle('active', on);
+    if (on) el.scrollIntoView({ block: 'nearest' });
+  });
+}
+
+function acceptWikiCompletion(index = wikiCompleteActive) {
+  const item = wikiCompleteItems[index];
+  if (!item || !wikiCompleteRange) return;
+  const suffix = editor.value.slice(wikiCompleteRange.end, wikiCompleteRange.end + 2) === ']]' ? '' : ']]';
+  const insert = `${item.insert}${suffix}`;
+  editor.value =
+    editor.value.slice(0, wikiCompleteRange.start) +
+    insert +
+    editor.value.slice(wikiCompleteRange.end);
+  const pos = wikiCompleteRange.start + insert.length;
+  editor.selectionStart = editor.selectionEnd = pos;
+  currentSource = editor.value;
+  setDirty(true);
+  closeWikiCompletion();
+  if (currentMode === 'edit') {
+    clearTimeout(renderDebounce);
+    renderDebounce = setTimeout(() => rerender(), 120);
+  }
+}
+
+function closeWikiCompletion() {
+  wikiCompleteOpen = false;
+  wikiComplete.hidden = true;
+  wikiComplete.innerHTML = '';
+  wikiCompleteItems = [];
+  wikiCompleteRange = null;
+}
+
+function getTextareaCaretRect(textarea) {
+  const style = window.getComputedStyle(textarea);
+  const mirror = document.createElement('div');
+  const props = [
+    'boxSizing', 'width', 'fontFamily', 'fontSize', 'fontWeight', 'fontStyle',
+    'letterSpacing', 'textTransform', 'paddingTop', 'paddingRight', 'paddingBottom',
+    'paddingLeft', 'borderTopWidth', 'borderRightWidth', 'borderBottomWidth',
+    'borderLeftWidth', 'lineHeight', 'whiteSpace', 'wordWrap',
+  ];
+  mirror.style.position = 'absolute';
+  mirror.style.visibility = 'hidden';
+  mirror.style.overflow = 'hidden';
+  mirror.style.whiteSpace = 'pre-wrap';
+  mirror.style.wordWrap = 'break-word';
+  for (const prop of props) mirror.style[prop] = style[prop];
+  mirror.textContent = textarea.value.slice(0, textarea.selectionStart);
+  const marker = document.createElement('span');
+  marker.textContent = '\u200b';
+  mirror.appendChild(marker);
+  document.body.appendChild(mirror);
+  const markerRect = marker.getBoundingClientRect();
+  const textareaRect = textarea.getBoundingClientRect();
+  const left = textareaRect.left + markerRect.left - mirror.getBoundingClientRect().left - textarea.scrollLeft;
+  const top = textareaRect.top + markerRect.top - mirror.getBoundingClientRect().top - textarea.scrollTop;
+  document.body.removeChild(mirror);
+  return {
+    left: Math.max(8, left),
+    top: Math.max(8, top),
+    bottom: Math.max(8, top + parseFloat(style.lineHeight || '20')),
+  };
+}
+
+editor.addEventListener('keydown', (e) => {
+  if (!wikiCompleteOpen) return;
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    wikiCompleteActive = Math.min(wikiCompleteActive + 1, wikiCompleteItems.length - 1);
+    updateWikiCompletionActive();
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    wikiCompleteActive = Math.max(wikiCompleteActive - 1, 0);
+    updateWikiCompletionActive();
+  } else if (e.key === 'Enter' || e.key === 'Tab') {
+    e.preventDefault();
+    acceptWikiCompletion();
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    closeWikiCompletion();
+  }
+});
+
+editor.addEventListener('click', scheduleWikiCompletion);
+editor.addEventListener('scroll', () => { if (wikiCompleteOpen) positionWikiCompletion(); });
 
 // ---------- Render pipeline ----------
 
@@ -1617,6 +2035,7 @@ const reloadDialog = document.getElementById('reload-conflict');
 // query into the in-document find bar so the user sees the hit highlighted
 // and scrolled into view instead of just a cold-open document.
 let pendingHighlight = null;
+let pendingWikiJump = null;
 
 function applyPendingHighlight(currentPath) {
   if (!pendingHighlight) return;
@@ -1633,9 +2052,37 @@ function applyPendingHighlight(currentPath) {
   openFind();
 }
 
-async function applyExternalDocument({ html: htmlOut, source, name, path }) {
+function normalizedHeadingText(text) {
+  return (text || '').toLowerCase().trim().replace(/\s+/g, ' ');
+}
+
+function scrollToHeading(heading) {
+  if (!heading) return false;
+  const wanted = normalizedHeadingText(heading);
+  for (const h of preview.querySelectorAll('h1,h2,h3,h4,h5,h6')) {
+    if (normalizedHeadingText(h.textContent) === wanted || h.id === heading) {
+      h.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return true;
+    }
+  }
+  return false;
+}
+
+function applyPendingWikiJump(path) {
+  if (!pendingWikiJump) return;
+  if (pendingWikiJump.path && path && pendingWikiJump.path !== path) {
+    pendingWikiJump = null;
+    return;
+  }
+  const heading = pendingWikiJump.heading;
+  pendingWikiJump = null;
+  if (heading && !scrollToHeading(heading)) flash(`Heading not found: ${heading}`);
+}
+
+async function applyExternalDocument({ html: htmlOut, source, name, path, reason = 'open' }) {
   currentSource = source;
   setDirty(false);
+  currentPath = path || '';
   if (path) {
     fileChip.textContent = path;
     fileChip.title = path;
@@ -1644,12 +2091,17 @@ async function applyExternalDocument({ html: htmlOut, source, name, path }) {
     fileChip.title = name;
   }
   if (name) document.title = `${name} — mdvw`;
+  recordDocumentNavigation(currentPath, name || fileChip.textContent || currentPath, reason);
+  if (browserLoaded) setActiveBrowserPath(currentPath);
   if (currentMode === 'edit' || currentMode === 'source') editor.value = source;
   preview.innerHTML = htmlOut;
   await enhance(preview);
   updateInspector();
   scheduleDiagnostics();
+  incomingLoaded = false;
+  if (leftPaneSection === 'incoming' && !leftPaneCollapsed) loadIncomingLinks();
   applyPendingHighlight(path);
+  applyPendingWikiJump(path);
   // Tell Python we committed to this version so it can advance the
   // save-conflict baseline. Without this, a rejected watch reload would
   // leave Python's baseline out-of-sync with reality.
@@ -1663,6 +2115,12 @@ async function applyExternalDocument({ html: htmlOut, source, name, path }) {
 document.getElementById('preview').addEventListener('click', (e) => {
   const a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
   if (!a) return;
+  const wikiRaw = a.dataset.wikilink;
+  if (wikiRaw) {
+    e.preventDefault();
+    openWikiLink(wikiRaw);
+    return;
+  }
   // Internal in-page anchors (#foo) are fine — let scrollIntoView handle via hashchange.
   const raw = a.getAttribute('href') || '';
   if (raw.startsWith('#')) {
@@ -1675,6 +2133,44 @@ document.getElementById('preview').addEventListener('click', (e) => {
   const api = getApi();
   if (api && api.open_external) api.open_external(a.href);
 }, true); // capture: pre-empts any in-document handlers
+
+async function openWikiLink(raw) {
+  const api = getApi();
+  if (!api || !api.resolve_wiki_link) { flash('Wiki links unavailable'); return; }
+  const resolved = await api.resolve_wiki_link(raw);
+  if (!resolved || !resolved.status) { flash('Wiki link unavailable'); return; }
+  if (resolved.status === 'ok' && resolved.path) {
+    if (sameBrowserPath(resolved.path, currentPath)) {
+      if (resolved.heading) scrollToHeading(resolved.heading);
+      return;
+    }
+    if (!(await confirmDiscardIfDirty())) return;
+    pendingWikiJump = { path: resolved.path, heading: resolved.heading || '' };
+    const ok = api.open_path ? await api.open_path(resolved.path) : false;
+    if (!ok) {
+      pendingWikiJump = null;
+      flash('Could not open wiki link');
+    }
+    return;
+  }
+  if (resolved.status === 'no_workspace') { flash(resolved.message || 'No workspace'); return; }
+  if (resolved.status === 'missing' && api.create_wiki_note) {
+    if (!(await confirmDiscardIfDirty())) return;
+    const created = await api.create_wiki_note(raw);
+    if (created && (created.status === 'created' || created.status === 'ok')) {
+      await refreshBrowserIfVisible(created.path || currentPath);
+      flash('Created note');
+      return;
+    }
+    flash((created && created.message) || 'Could not create note');
+    return;
+  }
+  flash(resolved.message || 'Wiki link not resolved');
+  if (resolved.status === 'ambiguous' || resolved.status === 'missing_heading') {
+    showLeftSection('diagnostics');
+    runDiagnostics();
+  }
+}
 
 // Pushed from Python (file watcher / open_file).
 // `reason` is 'open' (explicit user open, already gated by confirmDiscardIfDirty)

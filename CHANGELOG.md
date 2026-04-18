@@ -1,6 +1,24 @@
 # Changelog
 
 
+## [Unreleased]
+### Added
+- **Wiki links.** `[[Note]]`, `[[Note|alias]]`, `[[Note#Heading]]`, and
+  bare `[[#Heading]]` now resolve against the workspace. Clicking an
+  unresolved link offers to create the note next to the current one.
+  Typing `[[` in Source/Edit opens an autocomplete popup populated from
+  filenames in the launch directory; arrow keys + Enter accept.
+- **Incoming links pane.** New `INCOMING` sidebar section lists every
+  document that wiki-links to the current note, with surrounding
+  context and a click-to-jump target. Refreshed on each load.
+- **Back / Forward navigation.** Toolbar buttons plus `Alt+Left` /
+  `Alt+Right` walk the in-session document history. Disabled at the
+  ends of the stack.
+- **Wiki-link diagnostics.** The Diagnostics pane flags unresolved,
+  ambiguous, and missing-heading wiki links alongside the existing
+  frontmatter and broken-link checks.
+
+
 ## [0.7.1] — 2026-04-18
 ### Fixed
 - **Syntax highlighting illegible in light mode.** Code-block chrome

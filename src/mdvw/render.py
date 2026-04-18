@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html as _html
 import re
 
 import nh3
@@ -10,6 +11,8 @@ from mdit_py_plugins.dollarmath import dollarmath_plugin
 from mdit_py_plugins.footnote import footnote_plugin
 from mdit_py_plugins.front_matter import front_matter_plugin
 from mdit_py_plugins.tasklists import tasklists_plugin
+
+from .links import parse_wiki_inner
 
 
 def _mark_rule(state: StateInline, silent: bool) -> bool:
@@ -75,6 +78,42 @@ def _color_open_rule(state: StateInline, silent: bool) -> bool:
     return True
 
 
+def _wiki_link_rule(state: StateInline, silent: bool) -> bool:
+    src = state.src
+    pos = state.pos
+    if src[pos : pos + 2] != "[[":
+        return False
+    if pos > 0 and src[pos - 1] == "!":
+        return False
+    end = src.find("]]", pos + 2, state.posMax)
+    if end == -1:
+        return False
+    inner = src[pos + 2 : end].strip()
+    if not inner or "\n" in inner:
+        return False
+    parsed = parse_wiki_inner(inner)
+    if parsed is None:
+        return False
+    target, heading, _alias, display = parsed
+    if not silent:
+        tok = state.push("mdvw_wikilink_open", "a", 1)
+        attrs = {
+            "href": "#",
+            "class": "mdvw-wikilink",
+            "data-wikilink": inner,
+        }
+        if target:
+            attrs["data-wikilink-target"] = target
+        if heading:
+            attrs["data-wikilink-heading"] = heading
+        tok.attrs = attrs
+        text_tok = state.push("text", "", 0)
+        text_tok.content = display
+        state.push("mdvw_wikilink_close", "a", -1)
+    state.pos = end + 2
+    return True
+
+
 def _render_mark_open(self, tokens, idx, options, env):
     return "<mark>"
 
@@ -99,6 +138,22 @@ def _render_color_open(self, tokens, idx, options, env):
 
 def _render_color_close(self, tokens, idx, options, env):
     return "</span>"
+
+
+def _render_wikilink_open(self, tokens, idx, options, env):
+    attrs = tokens[idx].attrs or {}
+    attr_text = []
+    for name in ("href", "class", "data-wikilink", "data-wikilink-target", "data-wikilink-heading"):
+        value = attrs.get(name)
+        if value is None:
+            continue
+        safe = _html.escape(str(value), quote=True)
+        attr_text.append(f'{name}="{safe}"')
+    return f'<a {" ".join(attr_text)}>'
+
+
+def _render_wikilink_close(self, tokens, idx, options, env):
+    return "</a>"
 
 
 def _render_math_inline(self, tokens, idx, options, env):
@@ -140,7 +195,10 @@ _SANITIZE_TAGS = {
 # (e.g. headings via anchor plugin) are added after sanitization.
 _SANITIZE_ATTRS: dict[str, set[str]] = {
     "*": {"class", "data-color"},
-    "a": {"href", "title", "target"},
+    "a": {
+        "href", "title", "target",
+        "data-wikilink", "data-wikilink-target", "data-wikilink-heading",
+    },
     "img": {"src", "alt", "title", "width", "height"},
     "input": {"type", "checked", "disabled"},
     "code": {"class"},
@@ -167,6 +225,7 @@ def _build_md() -> MarkdownIt:
     md.inline.ruler.before("emphasis", "mdvw_mark", _mark_rule)
     md.inline.ruler.before("emphasis", "mdvw_ins", _ins_rule)
     md.inline.ruler.before("emphasis", "mdvw_color", _color_open_rule)
+    md.inline.ruler.before("link", "mdvw_wikilink", _wiki_link_rule)
 
     md.add_render_rule("mdvw_mark_open", _render_mark_open)
     md.add_render_rule("mdvw_mark_close", _render_mark_close)
@@ -174,6 +233,8 @@ def _build_md() -> MarkdownIt:
     md.add_render_rule("mdvw_ins_close", _render_ins_close)
     md.add_render_rule("mdvw_color_open", _render_color_open)
     md.add_render_rule("mdvw_color_close", _render_color_close)
+    md.add_render_rule("mdvw_wikilink_open", _render_wikilink_open)
+    md.add_render_rule("mdvw_wikilink_close", _render_wikilink_close)
     md.add_render_rule("math_inline", _render_math_inline)
     md.add_render_rule("math_block", _render_math_block)
     md.add_render_rule("math_inline_double", _render_math_block)

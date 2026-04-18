@@ -58,6 +58,21 @@ def test_task_list():
     assert 'type="checkbox"' in html and "checked" in html
 
 
+def test_wiki_link_renders_internal_anchor():
+    html = render_markdown("[[Note#Heading|Read this]]")
+    assert 'class="mdvw-wikilink"' in html
+    assert 'data-wikilink="Note#Heading|Read this"' in html
+    assert 'data-wikilink-target="Note"' in html
+    assert 'data-wikilink-heading="Heading"' in html
+    assert ">Read this</a>" in html
+
+
+def test_wiki_link_not_rendered_inside_code():
+    html = render_markdown("`[[Note]]`")
+    assert 'class="mdvw-wikilink"' not in html
+    assert "[[Note]]" in html
+
+
 def test_strikethrough():
     html = render_markdown("~~gone~~")
     assert "<s>gone</s>" in html or "<del>gone</del>" in html

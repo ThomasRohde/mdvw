@@ -3,7 +3,13 @@ __pycache__/
 *.pyo
 .pytest_cache/
 .ruff_cache/
+.uv-cache/
 .venv/
+.test-venv/
+.test-basetemp/
+.test-tmp/
+.tmp/
+/wiki/
 venv/
 build/
 dist/

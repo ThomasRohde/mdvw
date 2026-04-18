@@ -11,9 +11,16 @@ from pathlib import Path
 from urllib.parse import unquote
 
 from .frontmatter import parse_frontmatter
+from .links import LinkIndex, diagnose_wiki_links
 
 
-def check_document(source: str, doc_dir: str | None = None) -> list[dict]:
+def check_document(
+    source: str,
+    doc_dir: str | None = None,
+    *,
+    source_path: Path | None = None,
+    wiki_index: LinkIndex | None = None,
+) -> list[dict]:
     """Analyse *source* for common issues.
 
     Returns a list of ``{severity, message, line}`` dicts where
@@ -22,6 +29,7 @@ def check_document(source: str, doc_dir: str | None = None) -> list[dict]:
     issues: list[dict] = []
     _check_frontmatter(source, issues)
     _check_links(source, doc_dir, issues)
+    issues.extend(diagnose_wiki_links(source, source_path, wiki_index))
     return issues
 
 

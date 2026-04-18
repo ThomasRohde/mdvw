@@ -34,6 +34,15 @@ from . import __version__, config, state  # noqa: E402  (must run after logger f
 from .diagnostics import check_document as _check_document  # noqa: E402
 from .export import build_standalone_html as _build_standalone_html  # noqa: E402
 from .frontmatter import parse_frontmatter, split_frontmatter  # noqa: E402
+from .links import (  # noqa: E402
+    LinkIndex,
+    build_link_index,
+    fingerprint_root,
+    incoming_links,
+    normalize_note_name,
+    resolve_wiki_link,
+    search_wiki_targets,
+)
 from .render import render_frontmatter_card, render_markdown  # noqa: E402
 from .search import search_workspace as _search_workspace  # noqa: E402
 
@@ -267,6 +276,9 @@ class JsApi:
         # Cached top-level HWND for DWM title-bar theming. Populated once
         # on the `loaded` event; set_titlebar_dark is a no-op until then.
         self._hwnd: int | None = None
+        self._link_index: LinkIndex | None = None
+        self._link_index_fp: tuple[tuple[str, int, int], ...] | None = None
+        self._link_index_root: Path | None = None
 
     def set_dirty(self, value: bool) -> None:
         self._dirty = bool(value)
@@ -315,7 +327,7 @@ class JsApi:
         """Save the current document atomically.
 
         Returns a dict:
-          {"status": "ok"}                — written successfully
+          {"status": "ok", "path", ...}   — written successfully
           {"status": "cancelled"}         — user cancelled save-as dialog
           {"status": "conflict"}          — disk changed since load;
                                             caller should prompt user and
@@ -323,6 +335,7 @@ class JsApi:
           {"status": "error", "message"}  — OS-level write failure
         """
         path = self._current_path
+        was_untitled = path is None
         if path is None:
             picked = self._pick_save_path()
             if picked is None:
@@ -344,7 +357,16 @@ class JsApi:
         # Refresh fingerprint after successful write so the next save sees
         # this save as the new baseline.
         self._loaded_fingerprint = _fingerprint(path)
-        return {"status": "ok"}
+        self._invalidate_link_index()
+        if was_untitled:
+            state.add_recent(str(path))
+            state.set_key("last_file", str(path))
+        return {
+            "status": "ok",
+            "path": str(path),
+            "name": path.name,
+            "new_file": was_untitled,
+        }
 
     def open_external(self, url: str) -> bool:
         """Open a user-document link outside the WebView.
@@ -487,6 +509,7 @@ class JsApi:
         if not new_root.is_dir():
             return False
         self._browse_root = new_root
+        self._invalidate_link_index()
         state.set_key("last_browse_root", str(new_root))
         payload = _json_for_script_tag({"path": str(new_root)})
         self._window.evaluate_js(f"window.mdvwBrowseRootChanged({payload})")
@@ -636,6 +659,162 @@ class JsApi:
                 break
         return results
 
+    def _invalidate_link_index(self) -> None:
+        self._link_index = None
+        self._link_index_fp = None
+        self._link_index_root = None
+
+    def _get_link_index(self) -> LinkIndex | None:
+        if self._browse_root is None:
+            return None
+        try:
+            root = self._browse_root.resolve()
+        except OSError:
+            return None
+        fp = fingerprint_root(root)
+        if (
+            self._link_index is not None
+            and self._link_index_root == root
+            and self._link_index_fp == fp
+        ):
+            return self._link_index
+        index = build_link_index(root)
+        self._link_index = index
+        self._link_index_fp = fp
+        self._link_index_root = root
+        return index
+
+    def resolve_wiki_link(self, raw_target: str) -> dict:
+        """Resolve a wiki-link target in the current workspace."""
+        if not isinstance(raw_target, str):
+            return {"status": "invalid", "message": "Invalid wiki link"}
+        index = self._get_link_index()
+        if index is None:
+            return {"status": "no_workspace", "message": "No workspace"}
+        resolved = resolve_wiki_link(raw_target, self._current_path, index)
+        payload: dict = {
+            "status": resolved.status,
+            "message": resolved.message,
+            "heading": resolved.heading,
+        }
+        if resolved.target_path is not None:
+            payload["path"] = str(resolved.target_path)
+            payload["relative"] = resolved.target_relative
+        if resolved.matches:
+            payload["matches"] = [
+                {
+                    "path": str(p),
+                    "relative": str(p.relative_to(index.root)),
+                }
+                for p in resolved.matches
+                if p.is_relative_to(index.root)
+            ]
+        return payload
+
+    def open_wiki_link(self, raw_target: str) -> dict:
+        """Resolve and open a wiki link without creating missing notes."""
+        resolved = self.resolve_wiki_link(raw_target)
+        if resolved.get("status") != "ok" or not resolved.get("path"):
+            return resolved
+        if not self.open_path(str(resolved["path"])):
+            return {"status": "error", "message": "Could not open file"}
+        return resolved
+
+    def create_wiki_note(self, raw_target: str) -> dict:
+        """Create an unresolved wiki-link note beside the current note."""
+        if self._browse_root is None or not isinstance(raw_target, str):
+            return {"status": "error", "message": "No workspace"}
+        try:
+            root = self._browse_root.resolve()
+        except OSError:
+            return {"status": "error", "message": "No workspace"}
+        rel_name = normalize_note_name(raw_target)
+        if not rel_name:
+            return {"status": "error", "message": "Cannot create this wiki link"}
+        try:
+            current = self._current_path.resolve() if self._current_path else None
+        except OSError:
+            current = None
+        base = current.parent if current is not None and current.is_relative_to(root) else root
+        try:
+            target = (base / rel_name).resolve()
+        except OSError as e:
+            return {"status": "error", "message": str(e)}
+        if not target.is_relative_to(root):
+            return {"status": "error", "message": "Path traversal rejected"}
+        if target.suffix.lower() not in (".md", ".markdown"):
+            target = target.with_name(target.name + ".md")
+        try:
+            created = not target.exists()
+            if created:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                title = target.stem.replace("_", " ").replace("-", " ").strip() or target.stem
+                _atomic_write_text(target, f"# {title}\n")
+                self._invalidate_link_index()
+            self._load(target)
+        except OSError as e:
+            return {"status": "error", "message": str(e)}
+        return {
+            "status": "created" if created else "ok",
+            "path": str(target),
+            "relative": str(target.relative_to(root)),
+            "name": target.name,
+            "new_file": created,
+        }
+
+    def get_incoming_links(self, path_str: str | None = None) -> list[dict]:
+        """Return incoming wiki links for a document."""
+        index = self._get_link_index()
+        if index is None:
+            return []
+        if path_str:
+            try:
+                target = Path(path_str).resolve()
+            except OSError:
+                return []
+        elif self._current_path is not None:
+            try:
+                target = self._current_path.resolve()
+            except OSError:
+                return []
+        else:
+            return []
+        if not target.is_relative_to(index.root):
+            return []
+        return [
+            {
+                "source_path": str(item.source_path),
+                "source_relative": item.source_relative,
+                "line": item.line,
+                "col": item.col,
+                "display": item.display,
+                "raw": item.raw,
+                "context": item.context,
+            }
+            for item in incoming_links(index, target)
+        ]
+
+    def search_wiki_targets(
+        self,
+        query: str,
+        source_path: str | None = None,
+        max_results: int = 50,
+    ) -> list[dict]:
+        """Search wiki-link autocomplete targets."""
+        index = self._get_link_index()
+        if index is None:
+            return []
+        source = self._current_path
+        if source_path:
+            with contextlib.suppress(OSError):
+                source = Path(source_path).resolve()
+        return search_wiki_targets(
+            index,
+            query if isinstance(query, str) else "",
+            source,
+            max_results=max_results,
+        )
+
     _IMAGE_EXT_WHITELIST: ClassVar[frozenset[str]] = frozenset(
         {"png", "jpg", "jpeg", "gif", "webp"}
     )
@@ -722,7 +901,12 @@ class JsApi:
     def run_diagnostics(self, content: str) -> list[dict]:
         """Check the document for common issues."""
         doc_dir = str(self._current_path.parent) if self._current_path else None
-        return _check_document(content, doc_dir=doc_dir)
+        return _check_document(
+            content,
+            doc_dir=doc_dir,
+            source_path=self._current_path,
+            wiki_index=self._get_link_index(),
+        )
 
     def export_html(self, content: str) -> dict:
         """Export the current document as self-contained HTML."""
