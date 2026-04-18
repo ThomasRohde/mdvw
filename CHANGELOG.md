@@ -1,7 +1,7 @@
 # Changelog
 
 
-## [Unreleased]
+## [0.9.0] — 2026-04-18
 ### Added
 - **Graph view.** New canvas-based wiki-link graph with two modes:
   *Local* (centered on the current note, 1–2 hop neighborhood, follows
