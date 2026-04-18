@@ -23,10 +23,15 @@
     <div class="file-chip" id="file-chip" title="{{MD_PATH}}">{{MD_PATH}}</div>
   </div>
 
-  <div class="segmented" role="tablist" aria-label="View mode">
-    <button data-mode="read" class="seg active" role="tab" aria-selected="true">Read</button>
-    <button data-mode="edit" class="seg" role="tab" aria-selected="false">Edit</button>
-    <button data-mode="source" class="seg" role="tab" aria-selected="false">Source</button>
+  <div class="mode-cluster">
+    <div class="segmented" role="tablist" aria-label="View mode">
+      <button data-mode="read" class="seg active" role="tab" aria-selected="true">Read</button>
+      <button data-mode="edit" class="seg" role="tab" aria-selected="false">Edit</button>
+      <button data-mode="source" class="seg" role="tab" aria-selected="false">Source</button>
+    </div>
+    <button id="btn-graph-full" class="iconbtn" title="Graph view (Ctrl+Shift+G)" aria-label="Graph view">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="7" r="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="17" cy="6" r="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="15" cy="17" r="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M8.4 6.8l6.2-.6M7.8 9.1l5.7 6M16.2 8.3l-1 6.2"/></svg>
+    </button>
   </div>
 
   <div class="icon-bar">
@@ -70,6 +75,9 @@
       <button class="pane-tab" data-section="incoming" role="tab" aria-selected="false" title="Incoming links">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M10 7H7a5 5 0 0 0 0 10h3M14 7h3a5 5 0 0 1 0 10h-3M8 12h8"/></svg>
       </button>
+      <button class="pane-tab" data-section="graph" role="tab" aria-selected="false" title="Graph">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="7" r="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="17" cy="6" r="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="15" cy="17" r="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M8.4 6.8l6.2-.6M7.8 9.1l5.7 6M16.2 8.3l-1 6.2"/></svg>
+      </button>
       <button class="pane-tab" data-section="sessions" role="tab" aria-selected="false" title="Sessions">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M12 7v5l3 3"/></svg>
       </button>
@@ -97,6 +105,35 @@
       <section id="section-incoming" class="pane-section" hidden role="tabpanel">
         <header class="section-header"><span>INCOMING</span></header>
         <div id="incoming-list" class="incoming-list"></div>
+      </section>
+      <section id="section-graph" class="pane-section" hidden role="tabpanel">
+        <header class="section-header">
+          <span>GRAPH</span>
+          <div class="section-actions">
+            <button id="btn-graph-focus" class="section-action" title="Focus current note">◎</button>
+            <button id="btn-graph-refresh" class="section-action" title="Refresh graph">↻</button>
+            <button id="btn-graph-close" class="section-action" title="Exit fullscreen (Esc)">✕</button>
+          </div>
+        </header>
+        <div class="graph-controls">
+          <div class="graph-mode" role="group" aria-label="Graph mode">
+            <label><input type="radio" name="graph-mode" value="local" checked>Local</label>
+            <label><input type="radio" name="graph-mode" value="workspace">Workspace</label>
+          </div>
+          <label class="graph-depth">Depth <input id="graph-depth" type="range" min="1" max="2" value="1"><span id="graph-depth-value">1</span></label>
+          <label><input id="graph-show-unresolved" type="checkbox" checked>Unresolved</label>
+          <label><input id="graph-show-orphans" type="checkbox" checked>Orphans</label>
+        </div>
+        <div id="graph-stage" class="graph-stage">
+          <canvas id="graph-canvas"></canvas>
+          <div id="graph-tooltip" class="graph-tooltip" hidden></div>
+          <div class="graph-zoom">
+            <button id="graph-zoom-in" class="section-action" title="Zoom in">+</button>
+            <button id="graph-zoom-out" class="section-action" title="Zoom out">−</button>
+            <button id="graph-zoom-reset" class="section-action" title="Reset view">1:1</button>
+          </div>
+        </div>
+        <div id="graph-stats" class="graph-stats"></div>
       </section>
       <section id="section-diagnostics" class="pane-section" hidden role="tabpanel">
         <header class="section-header"><span>DIAGNOSTICS</span></header>
@@ -239,6 +276,7 @@
       <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Find in document</td></tr>
       <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd></td><td>Go to heading</td></tr>
       <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd></td><td>Search workspace</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd></td><td>Open graph view</td></tr>
       <tr><td><kbd>[</kbd><kbd>[</kbd></td><td>Complete wiki link</td></tr>
       <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd></td><td>Toggle narrow/wide preview</td></tr>
       <tr><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>I</kbd></td><td>Toggle inspector</td></tr>

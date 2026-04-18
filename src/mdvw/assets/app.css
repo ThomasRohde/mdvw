@@ -125,8 +125,11 @@ body { display: flex; flex-direction: column; }
   text-align: left;
 }
 
-.segmented {
+.mode-cluster {
   justify-self: center;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.segmented {
   display: inline-flex; background: var(--seg-bg);
   border-radius: 8px; padding: 3px;
 }
@@ -369,6 +372,107 @@ body { display: flex; flex-direction: column; }
 }
 .incoming-empty {
   padding: 16px 12px; color: var(--muted); font-size: 12.5px; text-align: center;
+}
+
+/* ---------- Graph ---------- */
+
+.graph-controls {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 0 12px 10px;
+  font-size: 12px; color: var(--fg-soft);
+  flex-shrink: 0;
+}
+.graph-controls label {
+  display: flex; align-items: center; gap: 6px;
+}
+.graph-mode {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 4px;
+}
+.graph-mode label {
+  justify-content: center;
+  padding: 5px 6px;
+  border: 1px solid var(--border); border-radius: 6px;
+  cursor: pointer; user-select: none;
+}
+.graph-mode label:has(input:checked) {
+  color: var(--fg); background: var(--accent-soft);
+}
+.graph-mode input {
+  position: absolute; opacity: 0; pointer-events: none;
+}
+.graph-depth {
+  justify-content: space-between;
+}
+.graph-depth input {
+  flex: 1; min-width: 0;
+}
+.graph-stage {
+  position: relative; flex: 1; min-height: 180px;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+}
+#graph-canvas {
+  display: block; width: 100%; height: 100%;
+  cursor: grab;
+}
+#graph-canvas.dragging { cursor: grabbing; }
+.graph-tooltip {
+  position: absolute; z-index: 3;
+  max-width: 220px;
+  padding: 6px 8px;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); color: var(--fg);
+  font-size: 12px; line-height: 1.4;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.16);
+  pointer-events: none;
+}
+.graph-tooltip .graph-tip-title {
+  display: block; font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.graph-tooltip .graph-tip-detail {
+  display: block; color: var(--muted); font-family: var(--font-mono);
+  font-size: 10.5px; overflow-wrap: anywhere;
+}
+.graph-zoom {
+  position: absolute; right: 8px; bottom: 8px;
+  display: flex; gap: 4px;
+}
+.graph-zoom .section-action {
+  background: var(--bg);
+}
+.graph-stats {
+  flex-shrink: 0;
+  padding: 8px 12px 12px;
+  color: var(--muted); font-size: 11.5px; line-height: 1.45;
+  min-height: 36px;
+}
+.graph-stats strong { color: var(--fg-soft); font-weight: 600; }
+
+#btn-graph-close { display: none; }
+body.graph-fullscreen #btn-graph-close { display: inline-flex; }
+body.graph-fullscreen #section-graph,
+body.graph-fullscreen #section-graph[hidden] {
+  display: flex !important;
+  position: fixed; inset: 0; z-index: 200;
+  background: var(--bg);
+}
+body.graph-fullscreen #section-graph .section-header {
+  padding: 14px 18px 10px; font-size: 12px;
+}
+body.graph-fullscreen #section-graph .graph-controls {
+  flex-direction: row; flex-wrap: wrap;
+  align-items: center; gap: 16px;
+  padding: 0 18px 12px;
+}
+body.graph-fullscreen #section-graph .graph-mode {
+  grid-template-columns: auto auto;
+}
+body.graph-fullscreen #section-graph .graph-depth { flex: 0 1 220px; }
+body.graph-fullscreen #section-graph .graph-stats {
+  padding: 8px 18px 14px;
 }
 
 /* ---------- Recent list ---------- */

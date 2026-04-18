@@ -36,6 +36,7 @@ from .export import build_standalone_html as _build_standalone_html  # noqa: E40
 from .frontmatter import parse_frontmatter, split_frontmatter  # noqa: E402
 from .links import (  # noqa: E402
     LinkIndex,
+    build_graph_payload,
     build_link_index,
     fingerprint_root,
     incoming_links,
@@ -168,6 +169,16 @@ def _save_dialog_path(result: object) -> str | None:
         return result
     # Sequence[str]
     return result[0] if result else None
+
+
+def _int_option(value: object, *, default: int, min_value: int, max_value: int) -> int:
+    if isinstance(value, bool):
+        return default
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(min_value, min(max_value, number))
 
 
 def _atomic_write_text(path: Path, content: str) -> None:
@@ -813,6 +824,50 @@ class JsApi:
             query if isinstance(query, str) else "",
             source,
             max_results=max_results,
+        )
+
+    def get_graph(self, options: dict | None = None) -> dict:
+        """Return a workspace or local wiki-link graph payload."""
+        index = self._get_link_index()
+        if index is None:
+            return {
+                "nodes": [],
+                "edges": [],
+                "stats": {
+                    "mode": "workspace",
+                    "depth": 1,
+                    "node_count": 0,
+                    "edge_count": 0,
+                    "total_nodes": 0,
+                    "total_edges": 0,
+                    "max_nodes": 500,
+                    "max_edges": 2_000,
+                    "truncated": False,
+                    "message": "No workspace",
+                },
+            }
+        if not isinstance(options, dict):
+            options = {}
+        mode = options.get("mode")
+        if mode not in {"workspace", "local"}:
+            mode = "local" if self._current_path is not None else "workspace"
+        depth = _int_option(options.get("depth"), default=1, min_value=1, max_value=2)
+        max_nodes = _int_option(options.get("max_nodes"), default=500, min_value=1, max_value=5_000)
+        max_edges = _int_option(
+            options.get("max_edges"),
+            default=2_000,
+            min_value=1,
+            max_value=20_000,
+        )
+        return build_graph_payload(
+            index,
+            self._current_path,
+            mode=mode,
+            depth=depth,
+            include_unresolved=options.get("include_unresolved") is not False,
+            include_orphans=options.get("include_orphans") is not False,
+            max_nodes=max_nodes,
+            max_edges=max_edges,
         )
 
     _IMAGE_EXT_WHITELIST: ClassVar[frozenset[str]] = frozenset(

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from mdvw.links import (
+    build_graph_payload,
     build_link_index,
     diagnose_wiki_links,
     incoming_links,
@@ -106,6 +107,60 @@ def test_incoming_links_returns_resolved_backlinks(tmp_path):
     incoming = incoming_links(index, (root / "Target.md").resolve())
 
     assert [item.source_relative for item in incoming] == ["A.md", "B.md"]
+
+
+def test_graph_payload_includes_resolved_unresolved_and_missing_heading(tmp_path):
+    root = _make_files(tmp_path, {
+        "Index.md": "[[Note]]\n[[Ghost]]\n[[Note#Missing]]",
+        "Note.md": "# Note",
+        "Orphan.md": "# Orphan",
+    })
+    index = build_link_index(root)
+
+    payload = build_graph_payload(index, mode="workspace", include_orphans=False)
+
+    node_ids = {node["id"] for node in payload["nodes"]}
+    edge_statuses = {(edge["target"], edge["status"]) for edge in payload["edges"]}
+    assert "Index.md" in node_ids
+    assert "Note.md" in node_ids
+    assert "Orphan.md" not in node_ids
+    assert any(
+        node["type"] == "unresolved" and node["label"] == "Ghost"
+        for node in payload["nodes"]
+    )
+    assert ("Note.md", "ok") in edge_statuses
+    assert ("Note.md", "missing_heading") in edge_statuses
+    assert any(status == "missing" for _target, status in edge_statuses)
+
+
+def test_graph_payload_can_hide_unresolved_nodes(tmp_path):
+    root = _make_files(tmp_path, {
+        "Index.md": "[[Note]]\n[[Ghost]]",
+        "Note.md": "# Note",
+    })
+    index = build_link_index(root)
+
+    payload = build_graph_payload(index, include_unresolved=False, include_orphans=False)
+
+    assert {node["id"] for node in payload["nodes"]} == {"Index.md", "Note.md"}
+    assert {edge["status"] for edge in payload["edges"]} == {"ok"}
+
+
+def test_graph_payload_local_depth_expands_bidirectionally(tmp_path):
+    root = _make_files(tmp_path, {
+        "A.md": "[[B]]",
+        "B.md": "[[C]]",
+        "C.md": "[[D]]",
+        "D.md": "",
+    })
+    index = build_link_index(root)
+
+    depth_1 = build_graph_payload(index, root / "A.md", mode="local", depth=1)
+    depth_2 = build_graph_payload(index, root / "A.md", mode="local", depth=2)
+
+    assert {node["id"] for node in depth_1["nodes"]} == {"A.md", "B.md"}
+    assert {node["id"] for node in depth_2["nodes"]} == {"A.md", "B.md", "C.md"}
+    assert any(node["id"] == "A.md" and node["current"] for node in depth_2["nodes"])
 
 
 def test_search_wiki_targets_prefers_stem_when_unique(tmp_path):

@@ -2,6 +2,15 @@
 
 
 ## [Unreleased]
+### Added
+- **Graph view.** New canvas-based wiki-link graph with two modes:
+  *Local* (centered on the current note, 1–2 hop neighborhood, follows
+  links bidirectionally) and *Workspace* (every note plus every link).
+  Toggle unresolved placeholders, hide orphans (workspace mode), pan,
+  zoom, and drag nodes; click a note to open it, click an unresolved
+  node to create it. Available as a sidebar pane and as a fullscreen
+  overlay via a new toolbar button next to Read/Edit/Source
+  (`Ctrl+Shift+G`, `Esc` to exit).
 
 
 ## [0.8.0] — 2026-04-18

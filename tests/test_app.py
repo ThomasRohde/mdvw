@@ -726,6 +726,33 @@ def test_jsapi_incoming_links(tmp_path):
     assert incoming[0]["raw"] == "Target"
 
 
+def test_jsapi_get_graph_defaults_to_local_with_current_note(tmp_path):
+    current = tmp_path / "Index.md"
+    target = tmp_path / "Target.md"
+    current.write_text("[[Target]]", encoding="utf-8")
+    target.write_text("# Target\n", encoding="utf-8")
+
+    api = app_mod.JsApi()
+    api._browse_root = tmp_path
+    api._current_path = current
+
+    graph = api.get_graph({})
+
+    assert graph["stats"]["mode"] == "local"
+    assert {node["id"] for node in graph["nodes"]} == {"Index.md", "Target.md"}
+    assert graph["edges"][0]["status"] == "ok"
+
+
+def test_jsapi_get_graph_returns_empty_without_workspace():
+    api = app_mod.JsApi()
+
+    graph = api.get_graph({"mode": "local"})
+
+    assert graph["nodes"] == []
+    assert graph["edges"] == []
+    assert graph["stats"]["message"] == "No workspace"
+
+
 def test_jsapi_create_wiki_note_current_folder(tmp_path):
     current = tmp_path / "notes" / "Index.md"
     current.parent.mkdir()
