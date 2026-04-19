@@ -3,6 +3,15 @@
 
 ## [Unreleased]
 
+### Changed
+- **App internals refactored.** Split the monolithic `app.py` module
+  into focused private helpers for document handling, workspace/wiki
+  behavior, Windows integration, and runtime bootstrap while preserving
+  the existing `JsApi` bridge and app behavior.
+- **Regression suite decomposed.** Replaced the single `test_app.py`
+  file with smaller app-focused test modules that mirror the refactored
+  internal boundaries.
+
 
 ## [0.9.0] — 2026-04-18
 ### Added
