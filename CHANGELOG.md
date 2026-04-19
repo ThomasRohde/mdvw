@@ -1,6 +1,9 @@
 # Changelog
 
 
+## [Unreleased]
+
+
 ## [0.9.0] — 2026-04-18
 ### Added
 - **Graph view.** New canvas-based wiki-link graph with two modes:
