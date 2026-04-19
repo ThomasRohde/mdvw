@@ -1,8 +1,7 @@
 # Changelog
 
 
-## [Unreleased]
-
+## [0.9.1] — 2026-04-19
 ### Changed
 - **App internals refactored.** Split the monolithic `app.py` module
   into focused private helpers for document handling, workspace/wiki
