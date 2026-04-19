@@ -163,6 +163,50 @@ def test_graph_payload_local_depth_expands_bidirectionally(tmp_path):
     assert any(node["id"] == "A.md" and node["current"] for node in depth_2["nodes"])
 
 
+def test_graph_payload_local_truncation_keeps_current_note(tmp_path):
+    files = {"Z.md": "# Z\n"}
+    files.update({f"A{i:03}.md": "[[Z]]\n" for i in range(501)})
+    root = _make_files(tmp_path, files)
+    index = build_link_index(root)
+
+    payload = build_graph_payload(index, root / "Z.md", mode="local", max_nodes=500)
+
+    node_ids = {node["id"] for node in payload["nodes"]}
+    assert payload["stats"]["truncated"] is True
+    assert len(node_ids) == 500
+    assert any(node["id"] == "Z.md" and node["current"] for node in payload["nodes"])
+    assert {
+        edge["source"]
+        for edge in payload["edges"]
+    } | {
+        edge["target"]
+        for edge in payload["edges"]
+    } <= node_ids
+
+
+def test_graph_payload_marks_ambiguous_links_as_ambiguous_nodes(tmp_path):
+    root = _make_files(tmp_path, {
+        "Index.md": "[[Note]]",
+        "A/Note.md": "# A",
+        "B/Note.md": "# B",
+    })
+    index = build_link_index(root)
+
+    payload = build_graph_payload(index, mode="workspace", include_orphans=False)
+
+    ambiguous_nodes = [
+        node
+        for node in payload["nodes"]
+        if node["type"] == "unresolved" and node["status"] == "ambiguous"
+    ]
+    assert len(ambiguous_nodes) == 1
+    assert {match["relative"] for match in ambiguous_nodes[0]["matches"]} == {
+        "A/Note.md",
+        "B/Note.md",
+    }
+    assert any(edge["status"] == "ambiguous" for edge in payload["edges"])
+
+
 def test_search_wiki_targets_prefers_stem_when_unique(tmp_path):
     root = _make_files(tmp_path, {
         "Index.md": "",

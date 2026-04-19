@@ -2040,7 +2040,12 @@ async function openGraphNode(node) {
     if (!ok) flash('Could not open note');
     return;
   }
-  if (node.type === 'unresolved' && api.create_wiki_note) {
+  if (node.type === 'unresolved') {
+    if (node.status !== 'missing') {
+      flash(node.message || 'Wiki link is ambiguous');
+      return;
+    }
+    if (!api.create_wiki_note) return;
     if (!(await confirmDiscardIfDirty())) return;
     const result = await api.create_wiki_note(node.target || node.label || '');
     if (result && (result.status === 'created' || result.status === 'ok')) {

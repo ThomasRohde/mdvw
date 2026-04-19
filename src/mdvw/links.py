@@ -316,9 +316,10 @@ def build_graph_payload(
         if include_unresolved or all_nodes.get(edge["target"], {}).get("type") != "unresolved"
     ]
 
+    local_distances: dict[str, int] = {}
     if mode == "local":
-        visible_node_ids = _local_graph_node_ids(index, current_path, filtered_edges, depth)
-        if not visible_node_ids:
+        local_distances = _local_graph_node_distances(index, current_path, filtered_edges, depth)
+        if not local_distances:
             return _graph_payload(
                 nodes=[],
                 edges=[],
@@ -330,6 +331,7 @@ def build_graph_payload(
                 max_edges=max_edges,
                 message="No current note",
             )
+        visible_node_ids = set(local_distances)
     else:
         visible_node_ids = {node_id for node_id, node in all_nodes.items() if _node_visible(node)}
         if not include_orphans:
@@ -348,7 +350,10 @@ def build_graph_payload(
     truncated = False
     ordered_node_ids = sorted(
         visible_node_ids,
-        key=lambda node_id: _graph_node_sort_key(all_nodes[node_id]),
+        key=lambda node_id: _graph_node_sort_key(
+            all_nodes[node_id],
+            local_distances.get(node_id) if mode == "local" else None,
+        ),
     )
     if len(ordered_node_ids) > max_nodes:
         truncated = True
@@ -481,41 +486,47 @@ def _graph_unresolved_node(
     }
 
 
-def _local_graph_node_ids(
+def _local_graph_node_distances(
     index: LinkIndex,
     current_path: Path | None,
     edges: list[dict],
     depth: int,
-) -> set[str]:
+) -> dict[str, int]:
     source = _resolve_source(current_path, index)
     if source is None or source not in index.files:
-        return set()
+        return {}
     center = index.files[source].relative
     adjacency: dict[str, set[str]] = {}
     for edge in edges:
         adjacency.setdefault(edge["source"], set()).add(edge["target"])
         adjacency.setdefault(edge["target"], set()).add(edge["source"])
 
-    seen = {center}
+    distances = {center: 0}
     frontier = {center}
-    for _hop in range(depth):
+    for hop in range(1, depth + 1):
         next_frontier: set[str] = set()
         for node_id in frontier:
-            next_frontier.update(adjacency.get(node_id, set()) - seen)
+            next_frontier.update(adjacency.get(node_id, set()) - distances.keys())
         if not next_frontier:
             break
-        seen.update(next_frontier)
+        for node_id in next_frontier:
+            distances[node_id] = hop
         frontier = next_frontier
-    return seen
+    return distances
 
 
 def _node_visible(node: dict) -> bool:
     return node.get("type") in {"note", "unresolved"}
 
 
-def _graph_node_sort_key(node: dict) -> tuple[int, str]:
+def _graph_node_sort_key(node: dict, local_distance: int | None = None) -> tuple[int, int, str]:
+    distance_rank = local_distance if local_distance is not None else 0
     type_rank = 0 if node.get("type") == "note" else 1
-    return type_rank, str(node.get("relative") or node.get("label") or node.get("id")).casefold()
+    return (
+        distance_rank,
+        type_rank,
+        str(node.get("relative") or node.get("label") or node.get("id")).casefold(),
+    )
 
 
 def _annotate_graph_degrees(

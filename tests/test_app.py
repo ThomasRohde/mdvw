@@ -753,6 +753,17 @@ def test_jsapi_get_graph_returns_empty_without_workspace():
     assert graph["stats"]["message"] == "No workspace"
 
 
+def test_graph_click_only_creates_missing_unresolved_nodes():
+    js = (Path(__file__).resolve().parents[1] / "src" / "mdvw" / "assets" / "app.js").read_text(
+        encoding="utf-8"
+    )
+    function_start = js.index("async function openGraphNode(node)")
+    create_note = js.index("const result = await api.create_wiki_note", function_start)
+    missing_gate = js.index("node.status !== 'missing'", function_start)
+
+    assert missing_gate < create_note
+
+
 def test_jsapi_create_wiki_note_current_folder(tmp_path):
     current = tmp_path / "notes" / "Index.md"
     current.parent.mkdir()
