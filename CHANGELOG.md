@@ -2,6 +2,23 @@
 
 
 ## [Unreleased]
+### Added
+- **Files pane refresh.** A ↻ button in the FILES section header
+  rebuilds the workspace tree on demand. Collapsing and re-expanding a
+  folder also re-lists its contents, so notes created by an external
+  tool (terminal, another editor, an agent) show up without
+  re-launching mdvw. Directory loads are generation-token guarded so
+  closing a folder mid-fetch cannot leave stale or duplicated entries.
+
+### Changed
+- **Collapsible YAML frontmatter.** Valid frontmatter now renders as a
+  closed `<details>` disclosure (labelled "FRONTMATTER") instead of an
+  always-expanded card, so it stops dominating the top of short notes.
+  Parse errors still render expanded so they stay visible.
+- **Tighter preview top margin.** The first element in the preview —
+  and the first element after a frontmatter card — now has
+  `margin-top: 0`, collapsing the ~60 px gap that stacked on top of
+  the preview's padding-top.
 
 
 ## [0.10.0] — 2026-04-20

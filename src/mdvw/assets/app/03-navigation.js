@@ -383,8 +383,19 @@ function renderEntries(entries, parent) {
       summary.textContent = e.name;
       details.appendChild(summary);
       // Lazy: only fetch children when the user actually expands the folder.
+      // On close, drop cached children so the next open re-lists from disk and
+      // picks up files created externally (e.g. by a terminal session).
+      // Bumping loadToken orphans any in-flight loadDir so its late render is a no-op.
       details.addEventListener('toggle', () => {
-        if (details.open && !details.dataset.loaded) loadDir(details);
+        if (details.open) {
+          if (!details.dataset.loaded) loadDir(details);
+          return;
+        }
+        details.dataset.loaded = '';
+        details.dataset.loadToken = String((Number(details.dataset.loadToken) || 0) + 1);
+        for (const child of Array.from(details.children)) {
+          if (child.tagName !== 'SUMMARY') child.remove();
+        }
       });
       li.appendChild(details);
     } else {
@@ -405,6 +416,8 @@ function renderEntries(entries, parent) {
 async function loadDir(details) {
   if (details.dataset.loaded) return;
   details.dataset.loaded = '1';
+  const token = String((Number(details.dataset.loadToken) || 0) + 1);
+  details.dataset.loadToken = token;
   const placeholder = document.createElement('div');
   placeholder.className = 'browser-empty';
   placeholder.textContent = 'Loading…';
@@ -415,6 +428,9 @@ async function loadDir(details) {
     try { result = await api.list_markdown_dir(details.dataset.path); }
     catch { /* leave entries empty */ }
   }
+  // Orphan this render if a close/refresh has since bumped the token, or if
+  // the user collapsed the folder while we were awaiting the API.
+  if (details.dataset.loadToken !== token || !details.open) return;
   placeholder.remove();
   renderEntries(result ? result.entries : [], details);
 }
@@ -480,6 +496,9 @@ browserNav.addEventListener('click', async (e) => {
     flash('Could not open file');
   }
 });
+
+const btnFilesRefresh = document.getElementById('btn-files-refresh');
+btnFilesRefresh.addEventListener('click', () => refreshBrowserIfVisible());
 
 btnFiles.addEventListener('click', async () => {
   if (!browseRoot) { flash('File browser unavailable'); return; }

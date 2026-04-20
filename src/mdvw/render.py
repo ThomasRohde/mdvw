@@ -460,7 +460,12 @@ def render_frontmatter_card(raw_yaml: str | None, error: str | None) -> str:
         html = f'<section class="md-frontmatter md-frontmatter--error">{body}</section>'
     elif raw_yaml is not None:
         escaped = nh3.clean_text(raw_yaml.strip())
-        html = f'<section class="md-frontmatter"><pre>{escaped}</pre></section>'
+        html = (
+            '<details class="md-frontmatter">'
+            "<summary>Frontmatter</summary>"
+            f"<pre>{escaped}</pre>"
+            "</details>"
+        )
     else:
         return ""
     return nh3.clean(

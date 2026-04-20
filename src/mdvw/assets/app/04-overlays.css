@@ -266,6 +266,28 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+details.md-frontmatter > summary {
+  padding: 6px 12px;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 0.78em;
+  font-weight: 600;
+  color: var(--fg-soft);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  list-style: none;
+  user-select: none;
+}
+details.md-frontmatter > summary::-webkit-details-marker { display: none; }
+details.md-frontmatter > summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 8px;
+  font-weight: normal;
+  transition: transform 0.15s ease;
+}
+details.md-frontmatter[open] > summary::before { transform: rotate(90deg); }
+details.md-frontmatter > pre { padding-top: 0; }
 .md-frontmatter--error {
   border-left-color: #c43b3b;
   background: rgba(196, 59, 59, 0.06);
