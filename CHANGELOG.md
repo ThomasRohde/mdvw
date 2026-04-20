@@ -1,6 +1,9 @@
 # Changelog
 
 
+## [Unreleased]
+
+
 ## [0.10.0] — 2026-04-20
 ### Added
 - **Block transclusions.** `![[Note]]` and `![[Note#Heading]]` on their
