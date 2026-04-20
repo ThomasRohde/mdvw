@@ -1,7 +1,7 @@
 # Changelog
 
 
-## [Unreleased]
+## [0.11.0] — 2026-04-20
 ### Added
 - **Files pane refresh.** A ↻ button in the FILES section header
   rebuilds the workspace tree on demand. Collapsing and re-expanding a
