@@ -107,6 +107,15 @@ def _read_asset(*parts: str) -> str:
     return (_ASSETS.joinpath(*parts)).read_text(encoding="utf-8")
 
 
+def _app_css() -> str:
+    """Return the concatenated application stylesheet bundle."""
+    styles_dir = _ASSETS / "app"
+    parts = sorted(styles_dir.glob("*.css"))
+    if not parts:
+        return _read_asset("app.css")
+    return "\n".join(path.read_text(encoding="utf-8") for path in parts)
+
+
 def _katex_css_with_inlined_fonts() -> str:
     """Return KaTeX CSS with woff2 ``url(fonts/…)`` rewritten to data URIs.
 
@@ -248,7 +257,7 @@ def build_standalone_html(
         html_body = _inline_relative_images(html_body, doc_dir)
 
     # Read and inline the app CSS
-    css = _read_asset("app.css")
+    css = _app_css()
 
     # Detect which client-side renderers the body actually needs.
     needs_math = 'class="math' in html_body

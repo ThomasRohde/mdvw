@@ -78,6 +78,23 @@ def test_jsapi_render_markdown_shows_yaml_error():
     assert "still body" in html
 
 
+def test_jsapi_render_markdown_expands_transclusion(tmp_path):
+    current = tmp_path / "Index.md"
+    embedded = tmp_path / "Embed.md"
+    current.write_text("![[Embed]]\n", encoding="utf-8")
+    embedded.write_text("# Embedded\n\nbody\n", encoding="utf-8")
+
+    api = app_mod.JsApi()
+    api._browse_root = tmp_path
+    api._current_path = current
+
+    html = api.render_markdown("![[Embed]]\n")
+
+    assert 'class="mdvw-transclusion"' in html
+    assert "Embedded" in html
+    assert "body" in html
+
+
 def test_parse_frontmatter_fields_is_json_serializable():
     import json
 
@@ -222,15 +239,17 @@ def test_build_html_rewrites_app_assets_to_absolute():
     """App assets must become absolute URLs, NOT a document-wide <base>."""
     html = app_mod._build_html("hi", None, False, assets_base="file:///x/y/")
     assert "<base" not in html
-    assert 'href="file:///x/y/app.css"' in html
+    assert 'href="file:///x/y/app/01-theme.css"' in html
     assert 'href="file:///x/y/vendor/katex/katex.min.css"' in html
     assert 'src="file:///x/y/vendor/mermaid/mermaid.min.js"' in html
+    assert 'src="file:///x/y/app/01-core.js"' in html
 
 
 def test_build_html_without_base_unchanged():
     html = app_mod._build_html("hi", None, False)
     assert "<base" not in html
-    assert 'href="app.css"' in html
+    assert 'href="app/01-theme.css"' in html
+    assert 'src="app/01-core.js"' in html
 
 
 def test_id_attribute_stripped_from_user_content():

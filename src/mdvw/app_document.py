@@ -22,16 +22,24 @@ from .render import render_frontmatter_card, render_markdown
 
 if TYPE_CHECKING:
     from .app import JsApi
+    from .link_support import LinkIndex
 
 
 ASSETS = files(__package__) / "assets"
 
 _APP_ASSET_ATTR_RE = re.compile(
-    r'(src|href)="((?:vendor/|app\.css|app\.js)[^"]*)"'
+    r'(src|href)="((?:vendor/|app(?:/[\w.-]+)*\.(?:css|js)|app\.(?:css|js))[^"]*)"'
 )
 
 
-def _render_with_frontmatter(source: str, doc_base: str | None = None) -> str:
+def _render_with_frontmatter(
+    source: str,
+    *,
+    path: Path | None = None,
+    browse_root: Path | None = None,
+    doc_base: str | None = None,
+    wiki_index: LinkIndex | None = None,
+) -> str:
     """Render ``source`` to HTML, prepending a frontmatter card when present."""
     raw_yaml, body = split_frontmatter(source)
     if raw_yaml is not None:
@@ -39,7 +47,15 @@ def _render_with_frontmatter(source: str, doc_base: str | None = None) -> str:
         card = render_frontmatter_card(raw_yaml, err)
     else:
         card = ""
-    return card + render_markdown(body, doc_base=doc_base)
+    if doc_base is None and path is not None:
+        doc_base = path.parent.resolve().as_uri() + "/"
+    return card + render_markdown(
+        body,
+        doc_base=doc_base,
+        current_path=path,
+        browse_root=browse_root,
+        _transclude_index=wiki_index,
+    )
 
 
 def _load_template() -> str:
@@ -79,10 +95,11 @@ def _json_for_script_tag(value: object) -> str:
 def _rewrite_app_asset_urls(template: str, assets_base: str) -> str:
     """Prefix app-asset references in the template with an absolute URL.
 
-    Replaces `src="vendor/foo.js"` and `href="app.css"` with their
-    absolute file:// equivalents. Avoids a document-wide `<base href>`,
-    which would also reroute user-document relative URLs and break
-    `![diagram](./diagram.png)` against the Markdown file's directory.
+    Replaces `src="vendor/foo.js"` and `href="app/01-theme.css"` with
+    their absolute file:// equivalents. Avoids a document-wide
+    `<base href>`, which would also reroute user-document relative URLs
+    and break `![diagram](./diagram.png)` against the Markdown file's
+    directory.
     """
     base = assets_base.rstrip("/") + "/"
 
@@ -98,6 +115,7 @@ def _build_html(
     edit: bool,
     assets_base: str = "",
     browse_root: Path | None = None,
+    wiki_index: LinkIndex | None = None,
 ) -> str:
     """Render the template with the given source embedded.
 
@@ -115,7 +133,13 @@ def _build_html(
     folder = str(path.parent) if path else ""
     path_str = str(path) if path else ""
     doc_base = path.parent.resolve().as_uri() + "/" if path else None
-    html_body = _render_with_frontmatter(source, doc_base=doc_base)
+    html_body = _render_with_frontmatter(
+        source,
+        path=path,
+        browse_root=browse_root,
+        doc_base=doc_base,
+        wiki_index=wiki_index,
+    )
     return (
         template
         .replace("{{MD_HTML}}", html_body)
@@ -229,11 +253,22 @@ def _fingerprint(path: Path) -> tuple[int, int] | None:
     return (st.st_mtime_ns, st.st_size)
 
 
-def _render_current_markdown(current_path: Path | None, text: str) -> str:
+def _render_current_markdown(
+    current_path: Path | None,
+    browse_root: Path | None,
+    text: str,
+    wiki_index: LinkIndex | None = None,
+) -> str:
     doc_base = None
     if current_path:
         doc_base = current_path.parent.resolve().as_uri() + "/"
-    return _render_with_frontmatter(text, doc_base=doc_base)
+    return _render_with_frontmatter(
+        text,
+        path=current_path,
+        browse_root=browse_root,
+        doc_base=doc_base,
+        wiki_index=wiki_index,
+    )
 
 
 def _parse_frontmatter_fields(text: str) -> dict | None:
@@ -286,7 +321,12 @@ def _save_current_file(api: JsApi, content: str, force: bool = False) -> dict:
 
 def _load_document(api: JsApi, path: Path, reason: str = "open") -> None:
     source = path.read_text(encoding="utf-8")
-    html = _render_with_frontmatter(source)
+    html = _render_with_frontmatter(
+        source,
+        path=path,
+        browse_root=api._browse_root,
+        wiki_index=api._get_link_index(),
+    )
     api._current_path = path
     new_fp = _fingerprint(path)
     if reason != "watch":

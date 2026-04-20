@@ -73,6 +73,73 @@ def test_wiki_link_not_rendered_inside_code():
     assert "[[Note]]" in html
 
 
+def test_wiki_transclusion_renders_note_body(tmp_path):
+    current = tmp_path / "Index.md"
+    embedded = tmp_path / "notes" / "Embed.md"
+    embedded.parent.mkdir()
+    current.write_text("![[notes/Embed]]\n", encoding="utf-8")
+    embedded.write_text(
+        "---\n"
+        "title: Hidden Title\n"
+        "---\n"
+        "# Real Title\n\n"
+        "![img](./diagram.png)\n",
+        encoding="utf-8",
+    )
+
+    html = render_markdown(
+        "![[notes/Embed]]\n",
+        doc_base=current.parent.resolve().as_uri() + "/",
+        current_path=current,
+        browse_root=tmp_path,
+    )
+
+    assert 'class="mdvw-transclusion"' in html
+    assert "Real Title" in html
+    assert "Hidden Title" not in html
+    assert embedded.parent.resolve().as_uri() in html
+
+
+def test_wiki_transclusion_renders_heading_section_only(tmp_path):
+    current = tmp_path / "Index.md"
+    note = tmp_path / "Note.md"
+    current.write_text("![[Note#Details]]\n", encoding="utf-8")
+    note.write_text(
+        "# Note\n\n"
+        "## Details\n"
+        "alpha detail\n\n"
+        "## Later\n"
+        "later detail\n",
+        encoding="utf-8",
+    )
+
+    html = render_markdown(
+        "![[Note#Details]]\n",
+        doc_base=current.parent.resolve().as_uri() + "/",
+        current_path=current,
+        browse_root=tmp_path,
+    )
+
+    assert 'class="mdvw-transclusion"' in html
+    assert "alpha detail" in html
+    assert "later detail" not in html
+
+
+def test_wiki_transclusion_leaves_missing_target_literal(tmp_path):
+    current = tmp_path / "Index.md"
+    current.write_text("![[Ghost]]\n", encoding="utf-8")
+
+    html = render_markdown(
+        "![[Ghost]]\n",
+        doc_base=current.parent.resolve().as_uri() + "/",
+        current_path=current,
+        browse_root=tmp_path,
+    )
+
+    assert "![[Ghost]]" in html
+    assert 'class="mdvw-transclusion"' not in html
+
+
 def test_strikethrough():
     html = render_markdown("~~gone~~")
     assert "<s>gone</s>" in html or "<del>gone</del>" in html

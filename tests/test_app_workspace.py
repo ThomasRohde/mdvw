@@ -231,6 +231,39 @@ def test_jsapi_incoming_links(tmp_path):
     assert incoming[0]["raw"] == "Target"
 
 
+def test_jsapi_get_workspace_tasks_filters_done_by_default(tmp_path):
+    note = tmp_path / "Tasks.md"
+    note.write_text(
+        "# Inbox\n"
+        "- [ ] open task\n"
+        "- [x] done task\n",
+        encoding="utf-8",
+    )
+
+    api = app_mod.JsApi()
+    api._browse_root = tmp_path
+
+    open_tasks = api.get_workspace_tasks()
+    all_tasks = api.get_workspace_tasks(include_done=True)
+
+    assert [task["text"] for task in open_tasks] == ["open task"]
+    assert [task["text"] for task in all_tasks] == ["open task", "done task"]
+
+
+def test_jsapi_toggle_workspace_task_updates_file(tmp_path):
+    note = tmp_path / "Tasks.md"
+    note.write_text("- [ ] open task\n", encoding="utf-8")
+
+    api = app_mod.JsApi()
+    api._browse_root = tmp_path
+
+    result = api.toggle_workspace_task(str(note), 1)
+
+    assert result["status"] == "ok"
+    assert result["checked"] is True
+    assert note.read_text(encoding="utf-8") == "- [x] open task\n"
+
+
 def test_jsapi_get_graph_defaults_to_local_with_current_note(tmp_path):
     current = tmp_path / "Index.md"
     target = tmp_path / "Target.md"
@@ -259,9 +292,14 @@ def test_jsapi_get_graph_returns_empty_without_workspace():
 
 
 def test_graph_click_only_creates_missing_unresolved_nodes():
-    js = (Path(__file__).resolve().parents[1] / "src" / "mdvw" / "assets" / "app.js").read_text(
-        encoding="utf-8"
-    )
+    js = (
+        Path(__file__).resolve().parents[1]
+        / "src"
+        / "mdvw"
+        / "assets"
+        / "app"
+        / "05-graph.js"
+    ).read_text(encoding="utf-8")
     function_start = js.index("async function openGraphNode(node)")
     create_note = js.index("const result = await api.create_wiki_note", function_start)
     missing_gate = js.index("node.status !== 'missing'", function_start)
@@ -304,6 +342,138 @@ def test_jsapi_create_wiki_note_sanitizes_traversal(tmp_path):
     assert result["status"] == "created"
     assert (tmp_path / "Secret.md").is_file()
     assert not (tmp_path.parent / "Secret.md").exists()
+
+
+def test_jsapi_get_note_templates_lists_markdown_files(tmp_path):
+    templates = tmp_path / "Templates"
+    templates.mkdir()
+    (templates / "Meeting.md").write_text("# meeting", encoding="utf-8")
+    (templates / "nested").mkdir()
+    (templates / "nested" / "Daily.markdown").write_text("# daily", encoding="utf-8")
+    (templates / "notes.txt").write_text("x", encoding="utf-8")
+
+    api = app_mod.JsApi()
+    api._browse_root = tmp_path
+
+    result = api.get_note_templates()
+
+    assert result == [
+        {
+            "name": "Meeting",
+            "relative": "Meeting.md",
+            "path": str((templates / "Meeting.md").resolve()),
+        },
+        {
+            "name": "Daily",
+            "relative": "nested/Daily.markdown",
+            "path": str((templates / "nested" / "Daily.markdown").resolve()),
+        },
+    ]
+
+
+def test_jsapi_create_note_uses_template_placeholders(tmp_path):
+    current = tmp_path / "notes" / "Inbox.md"
+    current.parent.mkdir()
+    current.write_text("# Inbox\n", encoding="utf-8")
+    templates = tmp_path / "Templates"
+    templates.mkdir()
+    (templates / "Meeting.md").write_text(
+        "---\n"
+        "title: {{title}}\n"
+        "slug: {{slug}}\n"
+        "path: {{path}}\n"
+        "---\n"
+        "# {{title}}\n",
+        encoding="utf-8",
+    )
+
+    api = app_mod.JsApi()
+    api._browse_root = tmp_path
+    api._current_path = current
+    api._window = MagicMock()
+
+    result = api.create_note("Projects/Weekly Review", "Meeting.md")
+
+    created = tmp_path / "notes" / "Projects" / "Weekly Review.md"
+    assert result["status"] == "created"
+    assert created.read_text(encoding="utf-8") == (
+        "---\n"
+        "title: Weekly Review\n"
+        "slug: weekly-review\n"
+        "path: notes/Projects/Weekly Review.md\n"
+        "---\n"
+        "# Weekly Review\n"
+    )
+    assert api._current_path == created.resolve()
+
+
+def test_jsapi_open_daily_note_creates_daily_file_from_template(tmp_path):
+    templates = tmp_path / "Templates"
+    templates.mkdir()
+    (templates / "Daily.md").write_text(
+        "# {{title}}\n"
+        "Date: {{date}}\n"
+        "Path: {{path}}\n",
+        encoding="utf-8",
+    )
+
+    api = app_mod.JsApi()
+    api._browse_root = tmp_path
+    api._window = MagicMock()
+
+    result = api.open_daily_note("2026-04-20")
+
+    created = tmp_path / "Daily" / "2026-04-20.md"
+    assert result["status"] == "created"
+    assert created.read_text(encoding="utf-8") == (
+        "# 2026-04-20\n"
+        "Date: 2026-04-20\n"
+        "Path: Daily/2026-04-20.md\n"
+    )
+    assert api._current_path == created.resolve()
+
+
+def test_note_commands_and_dialog_are_wired():
+    root = Path(__file__).resolve().parents[1] / "src" / "mdvw" / "assets"
+    shell_js = (root / "app" / "02-shell.js").read_text(encoding="utf-8")
+    doc_js = (root / "app" / "07-document.js").read_text(encoding="utf-8")
+    template = (root / "template.html").read_text(encoding="utf-8")
+
+    assert "registerCommand('note.new'" in shell_js
+    assert "registerCommand('note.new_template'" in shell_js
+    assert "registerCommand('note.daily'" in shell_js
+    assert "registerCommand('note.rename'" in shell_js
+    assert "async function openNoteCreateDialog" in doc_js
+    assert "async function openDailyNote" in doc_js
+    assert "async function openNoteMoveDialog" in doc_js
+    assert 'id="note-create-dialog"' in template
+    assert 'id="note-move-dialog"' in template
+
+
+def test_wiki_hover_preview_is_wired():
+    root = Path(__file__).resolve().parents[1] / "src" / "mdvw" / "assets"
+    doc_js = (root / "app" / "07-document.js").read_text(encoding="utf-8")
+    overlay_css = (root / "app" / "04-overlays.css").read_text(encoding="utf-8")
+    template = (root / "template.html").read_text(encoding="utf-8")
+
+    assert "api.preview_wiki_link" in doc_js
+    assert "function showWikiPreview" in doc_js
+    assert 'id="wiki-hover-preview"' in template
+    assert ".wiki-preview" in overlay_css
+    assert "pointer-events: none;" in overlay_css
+
+
+def test_task_pane_and_command_are_wired():
+    root = Path(__file__).resolve().parents[1] / "src" / "mdvw" / "assets"
+    shell_js = (root / "app" / "02-shell.js").read_text(encoding="utf-8")
+    workspace_js = (root / "app" / "04-workspace.js").read_text(encoding="utf-8")
+    template = (root / "template.html").read_text(encoding="utf-8")
+
+    assert "registerCommand('pane.tasks'" in shell_js
+    assert "async function loadTasks()" in workspace_js
+    assert "api.toggle_workspace_task" in workspace_js
+    assert 'data-section="tasks"' in template
+    assert 'id="tasks-list"' in template
 
 
 def test_open_recent_loads_file_outside_browse_root(tmp_path, monkeypatch):

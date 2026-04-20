@@ -6,7 +6,10 @@
 <title>{{MD_NAME}} — mdvw</title>
 <link rel="stylesheet" href="vendor/katex/katex.min.css">
 <link rel="stylesheet" href="vendor/hljs/github-dark.min.css">
-<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="app/01-theme.css">
+<link rel="stylesheet" href="app/02-shell.css">
+<link rel="stylesheet" href="app/03-content.css">
+<link rel="stylesheet" href="app/04-overlays.css">
 </head>
 <body>
 <header id="toolbar">
@@ -72,6 +75,9 @@
       <button class="pane-tab" data-section="search" role="tab" aria-selected="false" title="Search workspace">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="1.8"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M16 16l5 5"/></svg>
       </button>
+      <button class="pane-tab" data-section="tasks" role="tab" aria-selected="false" title="Tasks">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M9 6h10M9 12h10M9 18h10M4.5 6.5l1.5 1.5 2.5-3M4.5 12.5l1.5 1.5 2.5-3M4.5 18.5l1.5 1.5 2.5-3"/></svg>
+      </button>
       <button class="pane-tab" data-section="incoming" role="tab" aria-selected="false" title="Incoming links">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M10 7H7a5 5 0 0 0 0 10h3M14 7h3a5 5 0 0 1 0 10h-3M8 12h8"/></svg>
       </button>
@@ -97,6 +103,16 @@
           <label class="find-option" title="Match case"><input type="checkbox" id="ws-search-case"><span>Aa</span></label>
         </div>
         <div id="ws-search-results" class="ws-search-results"></div>
+      </section>
+      <section id="section-tasks" class="pane-section" hidden role="tabpanel">
+        <header class="section-header"><span>TASKS</span></header>
+        <div class="tasks-toolbar">
+          <label class="tasks-toggle">
+            <input id="tasks-show-done" type="checkbox">
+            <span>Show done</span>
+          </label>
+        </div>
+        <div id="tasks-list" class="tasks-list"></div>
       </section>
       <section id="section-sessions" class="pane-section" hidden role="tabpanel">
         <header class="section-header"><span>SESSIONS</span></header>
@@ -175,6 +191,7 @@
       <article id="preview" class="markdown-body">{{MD_HTML}}</article>
     </div>
     <div id="wiki-complete" class="wiki-complete" hidden></div>
+    <div id="wiki-hover-preview" class="wiki-preview" hidden></div>
   </div>
   <div class="pane-resize-handle" id="right-resize"></div>
   <aside id="right-pane" class="pane pane-right" hidden>
@@ -259,6 +276,46 @@
   </form>
 </dialog>
 
+<dialog id="note-create-dialog" class="note-create-dialog">
+  <form id="note-create-form">
+    <h3 id="note-create-title">New Note</h3>
+    <div class="note-create-body">
+      <label class="dialog-field">
+        <span>Name or path</span>
+        <input id="note-create-target" type="text" placeholder="Project/Idea" autocomplete="off" spellcheck="false">
+      </label>
+      <label id="note-create-template-row" class="dialog-field" hidden>
+        <span>Template</span>
+        <select id="note-create-template"></select>
+      </label>
+      <p id="note-create-hint" class="dialog-hint">Creates beside the current note, or at the workspace root.</p>
+      <p id="note-create-error" class="dialog-error" hidden></p>
+    </div>
+    <menu>
+      <button id="note-create-cancel" type="button">Cancel</button>
+      <button id="note-create-submit" type="submit" value="ok" autofocus>Create</button>
+    </menu>
+  </form>
+</dialog>
+
+<dialog id="note-move-dialog" class="note-create-dialog">
+  <form id="note-move-form">
+    <h3 id="note-move-title">Rename or Move Note</h3>
+    <div class="note-create-body">
+      <label class="dialog-field">
+        <span>Name or path</span>
+        <input id="note-move-target" type="text" placeholder="Archive/New Note" autocomplete="off" spellcheck="false">
+      </label>
+      <p id="note-move-hint" class="dialog-hint">Name keeps the current folder. Paths with / are workspace-relative.</p>
+      <p id="note-move-error" class="dialog-error" hidden></p>
+    </div>
+    <menu>
+      <button id="note-move-cancel" type="button">Cancel</button>
+      <button id="note-move-submit" type="submit" value="ok" autofocus>Move</button>
+    </menu>
+  </form>
+</dialog>
+
 <dialog id="help-dialog">
   <form method="dialog">
     <h3>Keyboard shortcuts</h3>
@@ -270,6 +327,7 @@
       <tr><td><kbd>E</kbd></td><td>Cycle Read → Edit → Source</td></tr>
       <tr><td><kbd>Alt</kbd>+<kbd>Left</kbd></td><td>Back</td></tr>
       <tr><td><kbd>Alt</kbd>+<kbd>Right</kbd></td><td>Forward</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>N</kbd></td><td>New note</td></tr>
       <tr><td><kbd>Ctrl</kbd>+<kbd>O</kbd></td><td>Open file</td></tr>
       <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd></td><td>Open directory</td></tr>
       <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>Save</td></tr>
@@ -322,6 +380,12 @@
 <script src="vendor/hljs/languages/xml.min.js"></script>
 <script src="vendor/hljs/languages/css.min.js"></script>
 <script src="vendor/hljs/languages/markdown.min.js"></script>
-<script type="module" src="app.js"></script>
+<script src="app/01-core.js"></script>
+<script src="app/02-shell.js"></script>
+<script src="app/03-navigation.js"></script>
+<script src="app/04-workspace.js"></script>
+<script src="app/05-graph.js"></script>
+<script src="app/06-session-theme.js"></script>
+<script src="app/07-document.js"></script>
 </body>
 </html>

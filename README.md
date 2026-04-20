@@ -19,7 +19,7 @@
 
 ## What it is
 
-A small Windows desktop app that opens a `.md` file and renders it beautifully — with KaTeX math, Mermaid diagrams, syntax-highlighted code, live reload when the file changes on disk, and a three-mode Read / Edit / Source view. Everything needed to render is vendored into the package: no network request is made to open or view a document.
+A small Windows desktop app for local Markdown notes and wikis. It opens a `.md` file and renders it beautifully — with KaTeX math, Mermaid diagrams, syntax-highlighted code, live reload when the file changes on disk, wiki links, a graph view, workspace search, and a three-mode Read / Edit / Source view. Everything needed to render is vendored into the package: no network request is made to open or view a document.
 
 ## Why
 
@@ -30,12 +30,13 @@ Most Markdown viewers either need a browser tab, a heavy IDE, or pull fonts and 
 - **Three modes** — Read, Edit (live split), Source (raw `.md` in a dark editor). Switch with `Ctrl+1/2/3` or cycle with `E`.
 - **Offline first** — KaTeX (math), Mermaid (diagrams), highlight.js (20 languages), and webfonts all ship inside the wheel, SHA256-pinned via a manifest.
 - **GFM + extensions** — tables, task lists, footnotes, strikethrough. Plus `==highlight==`, `++underline++`, and `{color:red}…{/color}` / `{color:#hex}…{/color}`.
-- **Wiki links** — `[[Note]]`, `[[Note|alias]]`, `[[Note#Heading]]`, `[[#Heading]]`. Click to navigate, type `[[` for filename autocomplete, click an unresolved link to create the note. Backlinks live in the **Incoming** sidebar pane; Diagnostics flags ambiguous and missing-heading targets.
+- **Wiki links + embeds** — `[[Note]]`, `[[Note|alias]]`, `[[Note#Heading]]`, `[[#Heading]]`, plus block embeds like `![[Note]]` and `![[Note#Heading]]`. Click to navigate, type `[[` for filename autocomplete, hover for a preview, click an unresolved link to create the note. Backlinks live in the **Incoming** sidebar pane; Diagnostics flags ambiguous and missing-heading targets.
+- **Fast note workflows** — create a note with `Ctrl+N`, create from a template, open today's daily note, and rename or move the current note while updating wiki links and relative Markdown links across the workspace.
 - **YAML frontmatter card** — `---`-fenced metadata renders as a styled card at the top of the preview; invalid YAML shows an error card without breaking the body.
 - **Live reload** — external changes on disk re-render instantly; unsaved edits get a conflict prompt rather than being silently overwritten.
-- **Command palette** — `Ctrl+P` blends slash-commands with filename matches from the workspace into one fuzzy-searchable input.
-- **Find in document + workspace search** — `Ctrl+F` for an in-page find bar (match count, case/whole-word toggles); `Ctrl+Shift+F` greps every `.md` under the launch directory and jumps to the match.
-- **Outline, files, recent, diagnostics** — switchable left-pane sections. The outline supports per-heading collapse plus `▲ All` / `▼ All` / `▶ Auto`. Diagnostics flag invalid frontmatter, broken relative links, and blocked remote refs.
+- **Command palette** — `Ctrl+P` blends app commands with filename matches from the workspace into one fuzzy-searchable input.
+- **Workspace search + tasks** — `Ctrl+Shift+F` greps every `.md` under the open workspace and jumps to the match. The **Tasks** pane aggregates `- [ ]` items across the workspace, groups them by note/heading, and lets you toggle them in place.
+- **Outline, files, recent, graph, diagnostics** — switchable left-pane sections. The outline supports per-heading collapse plus `▲ All` / `▼ All` / `▶ Auto`. Graph view shows local or workspace note links. Diagnostics flag invalid frontmatter, broken relative links, and blocked remote refs.
 - **Inspector + status bar** — right-pane inspector shows parsed frontmatter and document stats (words, headings, reading time); footer status bar tracks mode, dirty state, word count, cursor position, and the mdvw version.
 - **Image paste** — pasting an image in the editor saves it next to the document and inserts a relative `![](…)` reference.
 - **Export + print** — `Export HTML…` writes a single self-contained file (inlined CSS, fonts, and image data URIs); `Print…` hands off to the system print dialog for print-to-PDF.
@@ -69,16 +70,20 @@ mdvw --unregister          # remove the association
 | `Ctrl+P` | Command palette (commands + workspace filenames) |
 | `Ctrl+1` / `Ctrl+2` / `Ctrl+3` | Read / Edit (split) / Source |
 | `E` | Cycle Read → Edit → Source |
+| `Ctrl+N` | New note |
 | `Ctrl+O` | Open file |
 | `Ctrl+S` | Save (atomic; prompts on disk conflict) |
 | `Ctrl+F` | Find in document |
 | `Ctrl+Shift+F` | Search workspace |
 | `Ctrl+Shift+H` | Go to heading |
+| `Ctrl+Shift+G` | Open graph view |
 | `Ctrl+Shift+O` | Open directory |
 | `Alt+Left` / `Alt+Right` | Back / Forward through visited documents |
 | `[[` | Wiki-link filename autocomplete (in Edit / Source) |
 | `Ctrl+Shift+W` | Toggle narrow / wide preview |
 | `Ctrl+Alt+I` | Toggle inspector |
+
+Common command-palette note actions: `New Note`, `New Note from Template`, `Open Daily Note`, `Rename or Move Note`, `Show Tasks`, `Open Graph View`.
 
 ## Markdown extensions
 
@@ -90,6 +95,7 @@ Beyond GitHub Flavored Markdown, `mdvw` understands:
 {color:orange}orange{/color}, {color:#bf3989}pink{/color}
 
 [[Note]], [[Note|alias text]], [[Note#Heading]], [[#Same-doc heading]]
+![[Note]], ![[Note#Heading]]
 ```
 
 Inline math `$e^{i\pi}+1=0$` and block math:
@@ -117,7 +123,7 @@ Documents render through an HTML sanitizer with no network access, so opening an
 
 ## How it works (one paragraph)
 
-`render.py` parses Markdown with `markdown-it-py` + plugins, sanitizes with `nh3` (Rust ammonia), and rewrites user-relative URLs against the document's own directory. `app.py` renders a template into a per-instance HTML in `%TEMP%`, references packaged JS/CSS via absolute `file://` URLs (no `<base>` — that would misdirect user links), and opens it in a pywebview window using Windows WebView2. KaTeX / Mermaid / highlight.js run in the browser post-inject.
+`render.py` parses Markdown with `markdown-it-py` + plugins, sanitizes with `nh3` (Rust ammonia), resolves wiki links against the open workspace, expands block transclusions, and rewrites user-relative URLs against the document's own directory. `app.py` renders a template into a per-instance HTML in `%TEMP%`, references packaged JS/CSS via absolute `file://` URLs (no `<base>` — that would misdirect user links), and opens it in a pywebview window using Windows WebView2. KaTeX / Mermaid / highlight.js run in the browser post-inject.
 
 ## Releasing
 

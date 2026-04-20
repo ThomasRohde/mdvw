@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, ClassVar
 import webview
 
 from . import state
-from .app_document import _atomic_write_text, _json_for_script_tag
+from .app_document import _json_for_script_tag
 from .diagnostics import check_document as _check_document
 from .links import (
     LinkIndex,
@@ -16,11 +16,16 @@ from .links import (
     build_link_index,
     fingerprint_root,
     incoming_links,
-    normalize_note_name,
     resolve_wiki_link,
     search_wiki_targets,
 )
 from .search import search_workspace as _search_workspace_files
+from .tasks import (
+    list_workspace_tasks as _list_workspace_tasks_files,
+)
+from .tasks import (
+    toggle_workspace_task as _toggle_workspace_task_file,
+)
 
 if TYPE_CHECKING:
     from .app import JsApi
@@ -319,49 +324,6 @@ def _open_wiki_link(api: JsApi, raw_target: str) -> dict:
     return resolved
 
 
-def _create_wiki_note(api: JsApi, raw_target: str) -> dict:
-    """Create an unresolved wiki-link note beside the current note."""
-    if api._browse_root is None or not isinstance(raw_target, str):
-        return {"status": "error", "message": "No workspace"}
-    try:
-        root = api._browse_root.resolve()
-    except OSError:
-        return {"status": "error", "message": "No workspace"}
-    rel_name = normalize_note_name(raw_target)
-    if not rel_name:
-        return {"status": "error", "message": "Cannot create this wiki link"}
-    try:
-        current = api._current_path.resolve() if api._current_path else None
-    except OSError:
-        current = None
-    base = current.parent if current is not None and current.is_relative_to(root) else root
-    try:
-        target = (base / rel_name).resolve()
-    except OSError as exc:
-        return {"status": "error", "message": str(exc)}
-    if not target.is_relative_to(root):
-        return {"status": "error", "message": "Path traversal rejected"}
-    if target.suffix.lower() not in _MD_SUFFIXES:
-        target = target.with_name(target.name + ".md")
-    try:
-        created = not target.exists()
-        if created:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            title = target.stem.replace("_", " ").replace("-", " ").strip() or target.stem
-            _atomic_write_text(target, f"# {title}\n")
-            _invalidate_link_index(api)
-        api._load(target)
-    except OSError as exc:
-        return {"status": "error", "message": str(exc)}
-    return {
-        "status": "created" if created else "ok",
-        "path": str(target),
-        "relative": str(target.relative_to(root)),
-        "name": target.name,
-        "new_file": created,
-    }
-
-
 def _get_incoming_links(api: JsApi, path_str: str | None = None) -> list[dict]:
     """Return incoming wiki links for a document."""
     index = _get_link_index(api)
@@ -480,3 +442,33 @@ def _search_workspace(api: JsApi, query: str, case_sensitive: bool = False) -> l
     return _search_workspace_files(
         api._browse_root, query, case_sensitive=case_sensitive,
     )
+
+
+def _get_workspace_tasks(api: JsApi, include_done: bool = False) -> list[dict]:
+    """Return task-list items under the current browse root."""
+    if not api._browse_root:
+        return []
+    return _list_workspace_tasks_files(
+        api._browse_root,
+        include_done=bool(include_done),
+    )
+
+
+def _toggle_workspace_task(api: JsApi, path_str: str, line: int) -> dict:
+    """Toggle a task-list item in a workspace file."""
+    if not api._browse_root:
+        return {"status": "error", "message": "No workspace"}
+
+    result = _toggle_workspace_task_file(api._browse_root, path_str, line)
+    if result.get("status") != "ok" or not result.get("path"):
+        return result
+
+    if api._current_path is None:
+        return result
+
+    with contextlib.suppress(OSError):
+        current = api._current_path.resolve()
+        target = Path(str(result["path"])).resolve()
+        if target == current:
+            api._load(target, reason="watch")
+    return result

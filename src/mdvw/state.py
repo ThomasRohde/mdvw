@@ -79,3 +79,14 @@ def add_recent(path: str, *, max_entries: int = 20) -> None:
     recent.insert(0, path)
     data["recent_files"] = recent[:max_entries]
     save(data)
+
+
+def remove_recent(path: str) -> None:
+    """Remove *path* from the recent files list."""
+    data = load()
+    normalised = os.path.normcase(path)
+    recent = data.get("recent_files", [])
+    data["recent_files"] = [r for r in recent if os.path.normcase(r) != normalised]
+    if os.path.normcase(str(data.get("last_file") or "")) == normalised:
+        data["last_file"] = None
+    save(data)

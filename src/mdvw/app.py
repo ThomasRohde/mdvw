@@ -36,15 +36,23 @@ from .app_document import (  # noqa: E402
     _save_dialog_path,
     _save_image,
 )
+from .app_notes import (  # noqa: E402
+    _create_note,
+    _create_wiki_note,
+    _get_note_templates,
+    _open_daily_note,
+)
+from .app_preview import _preview_wiki_link  # noqa: E402
+from .app_rename import _move_current_note  # noqa: E402
 from .app_runtime import _start_app  # noqa: E402
 from .app_windows import _apply_titlebar_theme  # noqa: E402
 from .app_workspace import (  # noqa: E402
     _clear_recent_files,
-    _create_wiki_note,
     _get_graph,
     _get_incoming_links,
     _get_link_index,
     _get_recent_files,
+    _get_workspace_tasks,
     _invalidate_link_index,
     _list_markdown_dir,
     _open_directory,
@@ -58,6 +66,7 @@ from .app_workspace import (  # noqa: E402
     _search_filenames,
     _search_wiki_targets,
     _search_workspace,
+    _toggle_workspace_task,
 )
 from .links import LinkIndex  # noqa: E402
 
@@ -115,7 +124,12 @@ class JsApi:
         return True
 
     def render_markdown(self, text: str) -> str:
-        return _render_current_markdown(self._current_path, text)
+        return _render_current_markdown(
+            self._current_path,
+            self._browse_root,
+            text,
+            wiki_index=self._get_link_index(),
+        )
 
     def save_file(self, content: str, force: bool = False) -> dict:
         return _save_current_file(self, content, force=force)
@@ -183,11 +197,32 @@ class JsApi:
     def open_wiki_link(self, raw_target: str) -> dict:
         return _open_wiki_link(self, raw_target)
 
+    def preview_wiki_link(self, raw_target: str) -> dict:
+        return _preview_wiki_link(self, raw_target)
+
     def create_wiki_note(self, raw_target: str) -> dict:
         return _create_wiki_note(self, raw_target)
 
+    def create_note(self, raw_target: str, template_path: str = "") -> dict:
+        return _create_note(self, raw_target, template_path=template_path)
+
+    def get_note_templates(self) -> list[dict]:
+        return _get_note_templates(self)
+
+    def open_daily_note(self, date_str: str = "") -> dict:
+        return _open_daily_note(self, date_str=date_str)
+
+    def move_current_note(self, raw_target: str) -> dict:
+        return _move_current_note(self, raw_target)
+
     def get_incoming_links(self, path_str: str | None = None) -> list[dict]:
         return _get_incoming_links(self, path_str)
+
+    def get_workspace_tasks(self, include_done: bool = False) -> list[dict]:
+        return _get_workspace_tasks(self, include_done=include_done)
+
+    def toggle_workspace_task(self, path_str: str, line: int) -> dict:
+        return _toggle_workspace_task(self, path_str, line)
 
     def search_wiki_targets(
         self,

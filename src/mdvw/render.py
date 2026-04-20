@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html as _html
 import re
+from pathlib import Path
 
 import nh3
 from markdown_it import MarkdownIt
@@ -12,7 +13,9 @@ from mdit_py_plugins.footnote import footnote_plugin
 from mdit_py_plugins.front_matter import front_matter_plugin
 from mdit_py_plugins.tasklists import tasklists_plugin
 
-from .links import parse_wiki_inner
+from .frontmatter import split_frontmatter
+from .links import build_link_index, parse_wiki_inner, resolve_wiki_link
+from .note_excerpt import heading_excerpt
 
 
 def _mark_rule(state: StateInline, silent: bool) -> bool:
@@ -48,6 +51,9 @@ def _pair_rule(state: StateInline, silent: bool, delim: str, open_tag: str, clos
 
 
 _COLOR_RE = re.compile(r"\{color:([a-zA-Z]+|#[0-9a-fA-F]{3,8})\}")
+_TRANSCLUDE_LINE_RE = re.compile(r"^\s{0,3}!\[\[([^\]\n]+?)\]\]\s*$")
+_TRANSCLUDE_FENCE_RE = re.compile(r"^\s{0,3}((`{3,})|(~{3,})).*$")
+_MAX_TRANSCLUSION_DEPTH = 4
 
 
 def _color_open_rule(state: StateInline, silent: bool) -> bool:
@@ -330,6 +336,116 @@ def _rewrite_relative_urls(html: str, doc_base: str) -> str:
     return _RELATIVE_HREF_RE.sub(_sub, html)
 
 
+def _expand_transclusions(
+    text: str,
+    *,
+    current_path: Path | None,
+    browse_root: Path | None,
+    index,
+    stack: tuple[Path, ...],
+    depth: int,
+) -> tuple[str, list[tuple[str, str]]]:
+    if (
+        "![[" not in text
+        or current_path is None
+        or browse_root is None
+        or depth >= _MAX_TRANSCLUSION_DEPTH
+    ):
+        return text, []
+
+    out: list[str] = []
+    replacements: list[tuple[str, str]] = []
+    fence_char = ""
+    fence_len = 0
+    token_id = 0
+
+    for line in text.splitlines(keepends=True):
+        line_body = line.rstrip("\r\n")
+        newline = line[len(line_body) :]
+        stripped = line_body.lstrip()
+        if fence_char:
+            out.append(line)
+            if (
+                stripped.startswith(fence_char * fence_len)
+                and not stripped[fence_len:].strip(fence_char).strip()
+            ):
+                fence_char = ""
+                fence_len = 0
+            continue
+
+        fence_match = _TRANSCLUDE_FENCE_RE.match(line_body)
+        if fence_match:
+            fence = fence_match.group(1)
+            fence_char = fence[0]
+            fence_len = len(fence)
+            out.append(line)
+            continue
+
+        match = _TRANSCLUDE_LINE_RE.match(line_body)
+        if not match:
+            out.append(line)
+            continue
+
+        fragment = _render_transclusion_fragment(
+            match.group(1).strip(),
+            browse_root=browse_root,
+            current_path=current_path,
+            depth=depth,
+            index=index,
+            stack=stack,
+        )
+        if fragment is None:
+            out.append(line)
+            continue
+
+        token = f"__MDVW_TRANSCLUSION_{depth}_{token_id}__"
+        token_id += 1
+        slot = f'<div class="mdvw-transclusion-slot">{token}</div>'
+        out.append(slot + newline)
+        replacements.append((slot, fragment))
+
+    return "".join(out), replacements
+
+
+def _render_transclusion_fragment(
+    raw_target: str,
+    *,
+    browse_root: Path,
+    current_path: Path,
+    depth: int,
+    index,
+    stack: tuple[Path, ...],
+) -> str | None:
+    resolved = resolve_wiki_link(raw_target, current_path, index)
+    target = resolved.target_path
+    if resolved.status != "ok" or target is None:
+        return None
+
+    try:
+        target_key = target.resolve()
+        source = target.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+    if target_key in stack:
+        return None
+
+    _meta, body = split_frontmatter(source)
+    excerpt = heading_excerpt(body, resolved.heading) if resolved.heading else body.strip()
+    excerpt = excerpt.strip() or f"# {target.stem}\n"
+    doc_base = target.parent.resolve().as_uri() + "/"
+    html = render_markdown(
+        excerpt,
+        doc_base=doc_base,
+        current_path=target,
+        browse_root=browse_root,
+        _transclude_depth=depth + 1,
+        _transclude_index=index,
+        _transclude_stack=(*stack, target_key),
+    )
+    return f'<section class="mdvw-transclusion">{html}</section>'
+
+
 def render_frontmatter_card(raw_yaml: str | None, error: str | None) -> str:
     """Render a sanitized HTML card for YAML frontmatter.
 
@@ -356,12 +472,31 @@ def render_frontmatter_card(raw_yaml: str | None, error: str | None) -> str:
     )
 
 
-def render_markdown(text: str, doc_base: str | None = None) -> str:
+def render_markdown(
+    text: str,
+    doc_base: str | None = None,
+    current_path: Path | None = None,
+    browse_root: Path | None = None,
+    _transclude_depth: int = 0,
+    _transclude_index=None,
+    _transclude_stack: tuple[Path, ...] = (),
+) -> str:
     """Render markdown to sanitized HTML.
 
     `doc_base` is an optional absolute URL (with trailing slash) that
     user-markdown relative `href`/`src` values are resolved against.
     """
+    replacements: list[tuple[str, str]] = []
+    if current_path is not None and browse_root is not None and "![[" in text:
+        index = _transclude_index or build_link_index(browse_root)
+        text, replacements = _expand_transclusions(
+            text,
+            browse_root=browse_root,
+            current_path=current_path,
+            depth=_transclude_depth,
+            index=index,
+            stack=_transclude_stack,
+        )
     html = _MD.render(text)
     clean = nh3.clean(
         html,
@@ -374,4 +509,6 @@ def render_markdown(text: str, doc_base: str | None = None) -> str:
     )
     if doc_base:
         clean = _rewrite_relative_urls(clean, doc_base)
+    for slot, fragment in replacements:
+        clean = clean.replace(slot, fragment)
     return clean

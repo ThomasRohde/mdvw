@@ -2,6 +2,40 @@
 
 
 ## [Unreleased]
+### Added
+- **Block transclusions.** `![[Note]]` and `![[Note#Heading]]` on their
+  own line embed the target note (or a single heading's content) inline.
+  Recursion is depth-limited and cycle-safe; embeds inside fenced or
+  indented code blocks render literally.
+- **Note creation workflows.** `Ctrl+N` creates a new note next to the
+  current one; **New Note from Template** reads from
+  `assets/Templates/` (Meeting ships by default); **Open Daily Note**
+  opens or creates `YYYY-MM-DD.md` in the workspace's daily folder.
+- **Rename / move note.** Rename or relocate the current note and
+  mdvw rewrites every wiki link and relative Markdown link across the
+  workspace to match.
+- **Tasks pane.** New sidebar section aggregates `- [ ]` items across
+  every note in the workspace, groups them by note and heading, and
+  lets you toggle them in place — the change is written back to disk.
+- **Wiki-link hover preview.** Hovering a wiki link shows the target
+  note's heading excerpt in a popover without navigating.
+
+### Changed
+- **Assets split into focused bundles.** `app.css` and `app.js` are
+  replaced by numbered files under `assets/app/` (theme, shell,
+  content, overlays, core, navigation, workspace, graph, session
+  theme, document). Loaded by `template.html`; no user-visible change.
+- **Links module decomposed.** `links.py` is now a thin facade over
+  `link_support` (parsing), `link_index` (workspace scan +
+  fingerprint cache), and `link_graph` (graph queries).
+
+### Fixed
+- **Transclusion ignores indented code blocks.** Tightened the
+  preprocessor prefix to `\s{0,3}` so a 4-space-indented `![[Foo]]`
+  renders as a literal code example instead of silently embedding.
+- **Transclusion no longer rebuilds the workspace link index on every
+  render.** The document render path now reuses the fingerprint-cached
+  index the rest of the app already maintains.
 
 
 ## [0.9.1] — 2026-04-19
