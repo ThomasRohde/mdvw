@@ -428,9 +428,10 @@ async function loadDir(details) {
     try { result = await api.list_markdown_dir(details.dataset.path); }
     catch { /* leave entries empty */ }
   }
-  // Orphan this render if a close/refresh has since bumped the token, or if
-  // the user collapsed the folder while we were awaiting the API.
-  if (details.dataset.loadToken !== token || !details.open) return;
+  // Orphan this render if a close/refresh has since bumped the token. The
+  // close handler bumps the token too, so user-collapsed-mid-fetch is covered
+  // without also tripping when revealBrowserPath pre-loads a still-closed dir.
+  if (details.dataset.loadToken !== token) return;
   placeholder.remove();
   renderEntries(result ? result.entries : [], details);
 }

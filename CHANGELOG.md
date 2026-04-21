@@ -2,6 +2,13 @@
 
 
 ## [Unreleased]
+### Fixed
+- **Files pane refresh left "Loading…" stuck** when the active note lived
+  inside an expanded folder and its contents had been edited externally.
+  The reveal path pre-loaded the containing folder while it was still
+  closed, and `loadDir`'s `!details.open` bailout discarded the fetched
+  entries. The close handler already bumps the generation token, so that
+  half of the guard was redundant; dropping it lets the pre-load render.
 
 
 ## [0.11.0] — 2026-04-20
