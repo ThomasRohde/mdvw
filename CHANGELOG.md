@@ -1,6 +1,9 @@
 # Changelog
 
 
+## [Unreleased]
+
+
 ## [0.11.1] — 2026-04-21
 ### Fixed
 - **Files pane refresh left "Loading…" stuck** when the active note lived
